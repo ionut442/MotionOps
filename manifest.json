@@ -1,0 +1,13 @@
+{
+  "name": "MotionOps",
+  "id": "motionops-dev",
+  "api": "1.0.0",
+  "main": "dist/plugin.js",
+  "ui": "dist/index.html",
+  "documentAccess": "dynamic-page",
+  "editorType": ["figma"],
+  "networkAccess": {
+    "allowedDomains": ["none"],
+    "devAllowedDomains": ["http://localhost:3847"]
+  }
+}
