@@ -13,6 +13,9 @@ import type {
 
 export type InspectorMode = "compact" | "detailed" | "debug";
 export type InspectorWarningLevel = "info" | "warning";
+export type InspectorDiagnosticCategory = "warning" | "limitation" | "information" | "debug";
+export type InspectorAnimationState = "all" | "animated" | "no-motion";
+export type InspectorEditabilityStatus = "editable" | "partially-editable" | "read-only" | "unsupported";
 
 export interface InspectorTarget {
   readonly nodeId: string;
@@ -25,13 +28,26 @@ export interface InspectorTarget {
   readonly snapshot: MotionSnapshot | null;
   readonly readError?: string;
   readonly warnings: readonly InspectorWarning[];
+  readonly limitations: readonly InspectorWarning[];
+  readonly diagnostics: readonly InspectorWarning[];
+  readonly internalDiagnostics: readonly InspectorWarning[];
 }
 
 export interface InspectorWarning {
   readonly code: string;
   readonly level: InspectorWarningLevel;
+  readonly category: InspectorDiagnosticCategory;
+  readonly title: string;
   readonly message: string;
+  readonly impact?: string;
   readonly path?: string;
+}
+
+export interface InspectorTrackTiming {
+  readonly startMs: number;
+  readonly endMs: number;
+  readonly durationMs: number;
+  readonly keyframeCount: number;
 }
 
 export interface InspectorManualTrackGroup {
@@ -61,6 +77,7 @@ export interface InspectorFilters {
   readonly search: string;
   readonly sourceKind: "all" | MotionSourceKind;
   readonly property: string;
+  readonly animationState: InspectorAnimationState;
   readonly warningsOnly: boolean;
   readonly capabilityStatus: "all" | CapabilityStatus;
 }
@@ -69,6 +86,7 @@ export const createDefaultInspectorFilters = (): InspectorFilters => ({
   search: "",
   sourceKind: "all",
   property: "",
+  animationState: "all",
   warningsOnly: false,
   capabilityStatus: "all"
 });
@@ -82,6 +100,8 @@ export const formatMilliseconds = (value: number | undefined): string => {
   }
   return `${String(Math.round(value))} ms`;
 };
+
+export const SCALE_FORMAT_CONVENTION = "Scale values are shown as percentages, where 1 equals 100%.";
 
 export const formatEasing = (easing: NormalizedEasing | undefined): string => {
   if (!easing) {
@@ -137,6 +157,34 @@ export const formatValue = (value: unknown): string => {
   return typeof value;
 };
 
+export const formatMotionValue = (property: string, value: unknown): string => {
+  const scalar = scalarMotionValue(value);
+  if (scalar === null) {
+    return summarizeComplexMotionValue(value);
+  }
+
+  const normalizedProperty = property.toUpperCase();
+  if (normalizedProperty.includes("OPACITY")) {
+    return `${formatNumber(scalar * 100)}%`;
+  }
+  if (normalizedProperty.includes("ROTATION")) {
+    return `${formatNumber(scalar)}°`;
+  }
+  if (normalizedProperty.includes("SCALE")) {
+    return `${formatNumber(scalar * 100)}%`;
+  }
+  if (
+    normalizedProperty.includes("TRANSLATION") ||
+    normalizedProperty.includes("WIDTH") ||
+    normalizedProperty.includes("HEIGHT") ||
+    normalizedProperty.includes("CORNER_RADIUS") ||
+    normalizedProperty.includes("STROKE_WEIGHT")
+  ) {
+    return `${formatNumber(scalar)} px`;
+  }
+  return formatNumber(scalar);
+};
+
 export const sourceKindLabel = (source: MotionSourceKind): string => {
   switch (source) {
     case "none":
@@ -155,19 +203,61 @@ export const sourceKindLabel = (source: MotionSourceKind): string => {
 export const capabilityLabel = (status: CapabilityStatus): string => {
   switch (status) {
     case "supported":
-      return "Supported";
+      return "Editable";
     case "supported-with-warning":
-      return "Supported with warning";
+      return "Partially editable";
     case "read-only":
       return "Read-only";
     case "unsupported":
       return "Unsupported";
     case "unknown":
-      return "Unknown";
+      return "Capability not yet verified";
     default:
       return assertNever(status);
   }
 };
+
+export const editabilityStatusForCapability = (status: CapabilityStatus): InspectorEditabilityStatus => {
+  switch (status) {
+    case "supported":
+      return "editable";
+    case "supported-with-warning":
+      return "partially-editable";
+    case "read-only":
+      return "read-only";
+    case "unsupported":
+    case "unknown":
+      return "unsupported";
+    default:
+      return assertNever(status);
+  }
+};
+
+export const editabilityLabel = (status: InspectorEditabilityStatus): string => {
+  switch (status) {
+    case "editable":
+      return "Editable";
+    case "partially-editable":
+      return "Partially editable";
+    case "read-only":
+      return "Read-only";
+    case "unsupported":
+      return "Unsupported";
+    default:
+      return assertNever(status);
+  }
+};
+
+export const humanizeCapabilityName = (name: string): string =>
+  name
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/[-_]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase()
+    .replace(/^./, (character) => character.toUpperCase());
+
+export const nodeTypeLabel = (type: string): string => humanizeCapabilityName(type);
 
 export const groupInspectorTarget = (snapshot: MotionSnapshot): InspectorTargetGroups => {
   const timelines = [...snapshot.timelines].sort((left, right) => left.timelineId.localeCompare(right.timelineId));
@@ -218,6 +308,21 @@ export const groupInspectorTarget = (snapshot: MotionSnapshot): InspectorTargetG
   };
 };
 
+export const trackTiming = (track: NormalizedManualTrack): InspectorTrackTiming => {
+  const times = track.keyframes.map((keyframe) => keyframe.timeMs).filter((time) => Number.isFinite(time));
+  if (times.length === 0) {
+    return { startMs: 0, endMs: 0, durationMs: 0, keyframeCount: track.keyframes.length };
+  }
+  const startMs = Math.min(...times);
+  const endMs = Math.max(...times);
+  return {
+    startMs,
+    endMs,
+    durationMs: Math.max(0, endMs - startMs),
+    keyframeCount: track.keyframes.length
+  };
+};
+
 export const detectInspectorWarnings = (snapshot: MotionSnapshot): readonly InspectorWarning[] => {
   const warnings: InspectorWarning[] = [...normalizeAdapterWarnings(snapshot.warnings)];
 
@@ -226,6 +331,8 @@ export const detectInspectorWarnings = (snapshot: MotionSnapshot): readonly Insp
       warnings.push({
         code: "EMPTY_MANUAL_TRACK",
         level: "warning",
+        category: "warning",
+        title: "Manual track has no keyframes",
         message: `Manual track ${track.property} has no exposed keyframes.`,
         path: track.property
       });
@@ -236,6 +343,8 @@ export const detectInspectorWarnings = (snapshot: MotionSnapshot): readonly Insp
         warnings.push({
           code: "INVALID_TIME",
           level: "warning",
+          category: "warning",
+          title: "Invalid keyframe time",
           message: `Manual track ${track.property} has a non-finite keyframe time.`,
           path: track.property
         });
@@ -244,6 +353,8 @@ export const detectInspectorWarnings = (snapshot: MotionSnapshot): readonly Insp
         warnings.push({
           code: "NEGATIVE_TIME",
           level: "warning",
+          category: "warning",
+          title: "Negative keyframe time",
           message: `Manual track ${track.property} has a negative keyframe time.`,
           path: track.property
         });
@@ -253,6 +364,8 @@ export const detectInspectorWarnings = (snapshot: MotionSnapshot): readonly Insp
         warnings.push({
           code: "UNKNOWN_EASING_SHAPE",
           level: "warning",
+          category: "warning",
+          title: "Unknown easing shape",
           message: `Manual track ${track.property} has an unknown easing shape.`,
           path: track.property
         });
@@ -261,7 +374,10 @@ export const detectInspectorWarnings = (snapshot: MotionSnapshot): readonly Insp
         warnings.push({
           code: "UNKNOWN_VALUE_SHAPE",
           level: "info",
-          message: `Manual track ${track.property} has a value shape that needs read-only inspection.`,
+          category: "limitation",
+          title: "Some value details are read-only",
+          message: `MotionOps can inspect the ${humanizePropertyName(track.property)} track, but this value shape cannot be edited safely.`,
+          impact: "Inspect can show the track. Edit, Sequence, and Copy/Paste will skip this value unless a safe scalar format is available.",
           path: track.property
         });
       }
@@ -271,6 +387,8 @@ export const detectInspectorWarnings = (snapshot: MotionSnapshot): readonly Insp
         warnings.push({
           code: "DUPLICATE_KEYFRAME_TIME",
           level: "warning",
+          category: "warning",
+          title: "Duplicate keyframe time",
           message: `Manual track ${track.property} has ${String(count)} keyframes at ${formatMilliseconds(timeMs)}.`,
           path: track.property
         });
@@ -287,6 +405,8 @@ export const detectInspectorWarnings = (snapshot: MotionSnapshot): readonly Insp
       warnings.push({
         code: "TIMELINE_SHORTER_THAN_KEYFRAME",
         level: "warning",
+        category: "warning",
+        title: "Timeline is shorter than a keyframe",
         message: `Timeline ${timeline.timelineId} is shorter than the latest displayed keyframe.`,
         path: timeline.timelineId
       });
@@ -299,6 +419,8 @@ export const detectInspectorWarnings = (snapshot: MotionSnapshot): readonly Insp
       warnings.push({
         code: "MIXED_SOURCE_PROPERTY",
         level: "info",
+        category: "information",
+        title: "Manual and style data both mention this property",
         message: `Property ${derived.property} appears in manual and style-derived Motion data.`,
         path: derived.property
       });
@@ -307,20 +429,11 @@ export const detectInspectorWarnings = (snapshot: MotionSnapshot): readonly Insp
       warnings.push({
         code: "UNKNOWN_DERIVED_SHAPE",
         level: "info",
-        message: `Derived animation ${derived.property} contains a non-scalar read-only shape.`,
+        category: "limitation",
+        title: `Some ${humanizePropertyName(derived.property).toLowerCase()} details are read-only`,
+        message: `MotionOps can inspect the manual ${humanizePropertyName(derived.property).toLowerCase()} track, but some derived Figma animation data cannot be edited safely.`,
+        impact: "The manual track remains editable. Derived animation details are read-only and will not be modified by Edit or Sequence.",
         path: derived.property
-      });
-    }
-  }
-
-  const capabilities = Object.entries(snapshot.capabilities) as [string, MotionCapability][];
-  for (const [capabilityName, capability] of capabilities) {
-    if (capability.status === "unknown") {
-      warnings.push({
-        code: "UNKNOWN_CAPABILITY",
-        level: "info",
-        message: `${capabilityName} remains unknown.`,
-        path: capabilityName
       });
     }
   }
@@ -329,6 +442,28 @@ export const detectInspectorWarnings = (snapshot: MotionSnapshot): readonly Insp
     `${left.level}:${left.code}:${left.path ?? ""}`.localeCompare(`${right.level}:${right.code}:${right.path ?? ""}`)
   );
 };
+
+export const userFacingWarnings = (items: readonly InspectorWarning[]): readonly InspectorWarning[] =>
+  items.filter((item) => item.category === "warning");
+
+export const userFacingLimitations = (items: readonly InspectorWarning[]): readonly InspectorWarning[] =>
+  items.filter((item) => item.category === "limitation");
+
+export const informationalDiagnostics = (items: readonly InspectorWarning[]): readonly InspectorWarning[] =>
+  items.filter((item) => item.category === "information");
+
+export const detectInternalCapabilityDiagnostics = (snapshot: MotionSnapshot): readonly InspectorWarning[] =>
+  (Object.entries(snapshot.capabilities) as [string, MotionCapability][])
+    .filter(([, capability]) => capability.status === "unknown")
+    .map(([capabilityName]) => ({
+      code: "UNKNOWN_CAPABILITY",
+      level: "info" as const,
+      category: "debug" as const,
+      title: "Capability not yet verified",
+      message: `${humanizeCapabilityName(capabilityName)} remains unverified.`,
+      path: capabilityName
+    }))
+    .sort((left, right) => left.path.localeCompare(right.path));
 
 export const collectInspectorProperties = (targets: readonly InspectorTarget[]): readonly string[] =>
   [
@@ -354,6 +489,12 @@ export const filterInspectorTargets = (
       return false;
     }
     if (filters.sourceKind !== "all" && target.sourceKind !== filters.sourceKind) {
+      return false;
+    }
+    if (filters.animationState === "animated" && target.sourceKind === "none") {
+      return false;
+    }
+    if (filters.animationState === "no-motion" && target.sourceKind !== "none") {
       return false;
     }
     if (filters.warningsOnly && target.warnings.length === 0) {
@@ -404,9 +545,12 @@ export const buildInspectorTargets = (
     const readError = failuresById.get(node.id);
     const warnings = snapshot === null
       ? readError
-        ? [{ code: "PARTIAL_READ_FAILURE", level: "warning" as const, message: readError, path: node.id }]
+        ? [{ code: "PARTIAL_READ_FAILURE", level: "warning" as const, category: "warning" as const, title: "Motion read failed", message: readError, path: node.id }]
         : []
       : detectInspectorWarnings(snapshot);
+    const internalDiagnostics = snapshot === null ? [] : detectInternalCapabilityDiagnostics(snapshot);
+    const limitations = userFacingLimitations(warnings);
+    const diagnostics = informationalDiagnostics(warnings);
     return {
       nodeId: node.id,
       name: node.name,
@@ -417,7 +561,10 @@ export const buildInspectorTargets = (
       sourceKind: snapshot?.sources.kind ?? "none",
       snapshot,
       readError,
-      warnings
+      warnings: userFacingWarnings(warnings),
+      limitations,
+      diagnostics,
+      internalDiagnostics
     };
   });
 };
@@ -426,11 +573,54 @@ const normalizeAdapterWarnings = (warnings: readonly MotionAdapterWarning[]): re
   warnings.map((warning) => ({
     code: warning.code,
     level: "warning",
+    category: "warning",
+    title: humanizeCapabilityName(warning.code),
     message: warning.message,
     path: warning.path
   }));
 
 const formatNumber = (value: number): string => Number.parseFloat(value.toFixed(4)).toString();
+
+const scalarMotionValue = (value: unknown): number | null => {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "object" && value !== null) {
+    const record = value as Record<string, unknown>;
+    if (typeof record.value === "number" && Number.isFinite(record.value)) {
+      return record.value;
+    }
+  }
+  return null;
+};
+
+const summarizeComplexMotionValue = (value: unknown): string => {
+  if (Array.isArray(value)) {
+    return value.length === 0 ? "Empty value" : `Complex value (${String(value.length)} items)`;
+  }
+  if (typeof value === "object" && value !== null) {
+    const type = (value as Record<string, unknown>).type;
+    return typeof type === "string" && type.trim().length > 0 ? `${humanizeCapabilityName(type)} value` : "Complex value";
+  }
+  if (value === undefined) {
+    return "Not exposed";
+  }
+  if (value === null) {
+    return "Empty value";
+  }
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") {
+    return String(value);
+  }
+  if (typeof value === "symbol") {
+    return value.toString();
+  }
+  return "Complex value";
+};
+
+export const humanizePropertyName = (property: string): string =>
+  humanizeCapabilityName(property)
+    .replace(/\bX\b/g, "X")
+    .replace(/\bY\b/g, "Y");
 
 const assertNever = (value: never): never => {
   throw new Error(`Unhandled Inspector value: ${JSON.stringify(value)}`);

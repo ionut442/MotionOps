@@ -5,8 +5,6 @@ export interface ScopeFilterDefinition {
   readonly visibleOnly: boolean;
   readonly unlockedOnly: boolean;
   readonly nodeTypes: readonly string[];
-  readonly excludeHidden: boolean;
-  readonly excludeLocked: boolean;
   readonly excludedNodeIds: readonly string[];
 }
 
@@ -16,8 +14,6 @@ export const createDefaultScopeFilters = (): ScopeFilterDefinition =>
     visibleOnly: false,
     unlockedOnly: false,
     nodeTypes: Object.freeze([]),
-    excludeHidden: false,
-    excludeLocked: false,
     excludedNodeIds: Object.freeze([])
   });
 
@@ -36,11 +32,11 @@ const matchesFilters = (
     return false;
   }
 
-  if ((filters.visibleOnly || filters.excludeHidden) && !node.visible) {
+  if (filters.visibleOnly && !node.visible) {
     return false;
   }
 
-  if ((filters.unlockedOnly || filters.excludeLocked) && node.locked) {
+  if (filters.unlockedOnly && node.locked) {
     return false;
   }
 
@@ -84,6 +80,4 @@ export const hasActiveScopeFilters = (filters: ScopeFilterDefinition): boolean =
   filters.visibleOnly ||
   filters.unlockedOnly ||
   filters.nodeTypes.length > 0 ||
-  filters.excludeHidden ||
-  filters.excludeLocked ||
   filters.excludedNodeIds.length > 0;

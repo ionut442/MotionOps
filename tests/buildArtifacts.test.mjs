@@ -30,7 +30,10 @@ test("UI build artifact contains the production shell and resize contract", asyn
   assert.equal(html.includes("Edit workspace"), true);
   assert.equal(html.includes("Sequence workspace"), true);
   assert.equal(html.includes("Review workspace"), true);
-  assert.equal(html.includes("Rescan"), true);
+  assert.equal(html.includes("Refresh"), true);
+  assert.equal(html.includes("Connected"), false);
+  assert.equal(html.includes("No plugin message"), false);
+  assert.equal(html.includes("No resize request"), false);
   assert.equal(html.includes("No selection"), false);
   assert.equal(html.includes("0 targets"), false);
   assert.equal(html.includes("Settings"), false);

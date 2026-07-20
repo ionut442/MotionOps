@@ -106,19 +106,6 @@ describe("Scope filters", () => {
     ]);
   });
 
-  test("excludes hidden and locked layers", () => {
-    expect(ids(applyScopeFilters(result, filters({ excludeHidden: true })))).toEqual([
-      "frame",
-      "locked",
-      "text"
-    ]);
-    expect(ids(applyScopeFilters(result, filters({ excludeLocked: true })))).toEqual([
-      "frame",
-      "hidden",
-      "text"
-    ]);
-  });
-
   test("combines filters deterministically without mutating scan results", () => {
     const before = JSON.stringify(result);
     const filtered = applyScopeFilters(

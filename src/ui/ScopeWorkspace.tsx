@@ -31,6 +31,7 @@ import {
 } from "../domain/scopeOrdering";
 import type { ScopeScanNode, ScopeScanResult } from "../domain/scopeScan";
 import type { PluginToUiMessage, UiToPluginMessage } from "../shared/messages";
+import { Select } from "./components/ui";
 
 export interface ScopeWorkspaceProps {
   readonly lastMessage: PluginToUiMessage | null;
@@ -58,7 +59,7 @@ type ScopeViewState =
   | { readonly status: "error"; readonly message: string; readonly previousResult: ScopeScanResult | null };
 
 const SCOPE_MODE_OPTIONS: readonly { readonly mode: ScopeMode; readonly label: string }[] = [
-  { mode: "current-selection", label: "Selected object" },
+  { mode: "current-selection", label: "Current selection" },
   { mode: "direct-children", label: "Direct children" },
   { mode: "all-descendants", label: "All descendants" },
   { mode: "depth-limited", label: "Depth" },
@@ -79,12 +80,6 @@ const ORDER_LABELS: Record<ScopeOrderMode, string> = {
 
 const nodeTypeLabel = (type: string): string => type.toLowerCase().replaceAll("_", " ");
 
-const manualIdsFromInput = (value: string): readonly string[] =>
-  value
-    .split(/[\s,]+/)
-    .map((item) => item.trim())
-    .filter((item) => item.length > 0);
-
 const childLookup = (nodes: readonly ScopeScanNode[]): Map<string | null, ScopeScanNode[]> => {
   const lookup = new Map<string | null, ScopeScanNode[]>();
   for (const node of nodes) {
@@ -95,23 +90,60 @@ const childLookup = (nodes: readonly ScopeScanNode[]): Map<string | null, ScopeS
   return lookup;
 };
 
-const visibleRoots = (result: ScopeScanResult, childrenByParent: Map<string | null, ScopeScanNode[]>) =>
-  result.nodes
-    .filter((node) => node.parentId === null || !result.nodes.some((candidate) => candidate.id === node.parentId))
-    .filter((node, index, all) => all.findIndex((candidate) => candidate.id === node.id) === index)
-    .map((root) => ({
-      ...root,
-      childCount: childrenByParent.get(root.id)?.length ?? 0
-    }));
-
 const resultForState = (state: ScopeViewState): ScopeScanResult | null => {
   if (state.status === "ready" || state.status === "stale") {
     return state.result;
   }
-  if (state.status === "scanning" || state.status === "error" || state.status === "cancelled") {
-    return state.status === "cancelled" ? state.result : state.previousResult;
+  if (state.status === "scanning" || state.status === "error") {
+    return state.previousResult;
+  }
+  if (state.status === "cancelled") {
+    return state.result;
   }
   return null;
+};
+
+const visibleRoots = (result: ScopeScanResult): readonly ScopeScanNode[] =>
+  result.nodes.filter(
+    (node, index, nodes) =>
+      (node.parentId === null || !nodes.some((candidate) => candidate.id === node.parentId)) &&
+      nodes.findIndex((candidate) => candidate.id === node.id) === index
+  );
+
+const idsSignature = (ids: ReadonlySet<string>): string => [...ids].sort((left, right) => left.localeCompare(right)).join("|");
+
+const scopeSignature = (result: ScopeScanResult | null): string =>
+  result === null ? "" : idsSignature(new Set(result.nodes.map((node) => node.id)));
+
+const descendantIds = (
+  nodeId: string,
+  childrenByParent: Map<string | null, ScopeScanNode[]>
+): readonly string[] => {
+  const ids: string[] = [];
+  const visit = (id: string) => {
+    ids.push(id);
+    for (const child of childrenByParent.get(id) ?? []) {
+      visit(child.id);
+    }
+  };
+  visit(nodeId);
+  return ids;
+};
+
+const scanScopeForDefinition = (scope: ScopeDefinition): ScopeDefinition =>
+  scope.mode === "manual" ? { mode: "all-descendants" } : scope;
+
+const buildScopeResult = (
+  source: ScopeScanResult,
+  checkedIds: ReadonlySet<string>
+): ScopeScanResult => {
+  const activeNodes = source.nodes.filter((node) => checkedIds.has(node.id));
+  const activeIds = new Set(activeNodes.map((node) => node.id));
+  return {
+    roots: source.roots.filter((rootId) => activeIds.has(rootId)),
+    nodes: activeNodes,
+    issues: source.issues
+  };
 };
 
 export const ScopeWorkspace = ({
@@ -123,27 +155,25 @@ export const ScopeWorkspace = ({
   const [viewState, setViewState] = useState<ScopeViewState>({ status: "idle" });
   const [scopeDefinition, setScopeDefinition] = useState<ScopeDefinition>(createDefaultScopeDefinition);
   const [depthInput, setDepthInput] = useState("2");
-  const [manualInput, setManualInput] = useState("");
   const [modeError, setModeError] = useState<string | null>(null);
   const [filters, setFilters] = useState<ScopeFilterDefinition>(createDefaultScopeFilters);
   const [order, setOrder] = useState<ScopeOrderDefinition>(createDefaultScopeOrder);
   const [automaticOrderMode, setAutomaticOrderMode] = useState<ScopeOrderMode>("layer-panel");
   const [customNodeIds, setCustomNodeIds] = useState<readonly string[]>([]);
-  const [selectionSyncEnabled, setSelectionSyncEnabled] = useState(false);
   const [revealMessage, setRevealMessage] = useState<string | null>(null);
   const [expandedIds, setExpandedIds] = useState<ReadonlySet<string>>(() => new Set());
   const [checkedIds, setCheckedIds] = useState<ReadonlySet<string>>(() => new Set());
+  const [confirmedScope, setConfirmedScope] = useState<ScopeScanResult | null>(null);
+  const [lastConfirmedSignature, setLastConfirmedSignature] = useState("");
   const activeRequestIdRef = useRef<string | null>(null);
   const initializedRef = useRef(false);
   const scopeDefinitionRef = useRef(scopeDefinition);
-  const selectionSyncEnabledRef = useRef(selectionSyncEnabled);
+  const selectionDebounceRef = useRef<number | null>(null);
+  const dragNodeIdRef = useRef<string | null>(null);
+
   useEffect(() => {
     scopeDefinitionRef.current = scopeDefinition;
   }, [scopeDefinition]);
-
-  useEffect(() => {
-    selectionSyncEnabledRef.current = selectionSyncEnabled;
-  }, [selectionSyncEnabled]);
 
   const requestScan = useCallback((scope: ScopeDefinition) => {
     if (activeRequestIdRef.current !== null) {
@@ -160,9 +190,25 @@ export const ScopeWorkspace = ({
     sendToPlugin({
       type: "SCOPE_SCAN_REQUEST",
       requestId,
-      scope
+      scope: scanScopeForDefinition(scope)
     });
   }, [createRequestId, sendToPlugin]);
+
+  const scheduleSelectionScan = useCallback(() => {
+    if (selectionDebounceRef.current !== null) {
+      window.clearTimeout(selectionDebounceRef.current);
+    }
+    selectionDebounceRef.current = window.setTimeout(() => {
+      selectionDebounceRef.current = null;
+      requestScan(scopeDefinitionRef.current);
+    }, 80);
+  }, [requestScan]);
+
+  useEffect(() => () => {
+    if (selectionDebounceRef.current !== null) {
+      window.clearTimeout(selectionDebounceRef.current);
+    }
+  }, []);
 
   const cancelScan = () => {
     if (activeRequestIdRef.current === null) {
@@ -248,26 +294,23 @@ export const ScopeWorkspace = ({
     }
 
     if (lastMessage.type === "SCOPE_SELECTION_CHANGED") {
-      if (selectionSyncEnabledRef.current) {
-        requestScan(scopeDefinitionRef.current);
-      } else {
-        setViewState((current) => {
-          const result = resultForState(current);
-          return result === null
-            ? current
-            : {
-                status: "stale",
-                result,
-                reason: "Figma selection changed while selection sync is off."
-              };
-        });
-      }
+      scheduleSelectionScan();
+      setViewState((current) => {
+        const result = resultForState(current);
+        return result === null
+          ? current
+          : {
+              status: "stale",
+              result,
+              reason: "Figma selection changed. A new Scope draft is being prepared."
+            };
+      });
     }
 
     if (lastMessage.type === "SCOPE_REVEAL_NODE_RESULT") {
       setRevealMessage(lastMessage.result.message);
     }
-  }, [lastMessage, requestScan]);
+  }, [lastMessage, scheduleSelectionScan]);
 
   const result = resultForState(viewState);
   const effectiveOrder = useMemo<ScopeOrderDefinition>(
@@ -282,6 +325,14 @@ export const ScopeWorkspace = ({
     () => (orderedResult === null ? null : applyScopeFilters(orderedResult, filters)),
     [filters, orderedResult]
   );
+  const childrenByParent = useMemo(
+    () => childLookup(filteredResult?.nodes ?? []),
+    [filteredResult]
+  );
+  const roots = useMemo(
+    () => (filteredResult === null ? [] : visibleRoots(filteredResult)),
+    [filteredResult]
+  );
   const nodeTypes = useMemo(
     () =>
       Array.from(new Set(result?.nodes.map((node) => node.type) ?? [])).sort((left, right) =>
@@ -289,30 +340,12 @@ export const ScopeWorkspace = ({
       ),
     [result]
   );
-  const childrenByParent = useMemo(
-    () => childLookup(filteredResult?.nodes ?? []),
-    [filteredResult]
+  const draftScopeResult = useMemo<ScopeScanResult | null>(
+    () => (filteredResult === null ? null : buildScopeResult(filteredResult, checkedIds)),
+    [checkedIds, filteredResult]
   );
-  const roots = useMemo(
-    () => (filteredResult === null ? [] : visibleRoots(filteredResult, childrenByParent)),
-    [childrenByParent, filteredResult]
-  );
-  const activeScopeResult = useMemo<ScopeScanResult | null>(() => {
-    if (filteredResult === null) {
-      return null;
-    }
-    const activeNodes = filteredResult.nodes.filter((node) => checkedIds.has(node.id));
-    const activeIds = new Set(activeNodes.map((node) => node.id));
-    return {
-      roots: filteredResult.roots.filter((rootId) => activeIds.has(rootId)),
-      nodes: activeNodes,
-      issues: filteredResult.issues
-    };
-  }, [checkedIds, filteredResult]);
-
-  useEffect(() => {
-    onConfirmedScopeChange?.(activeScopeResult);
-  }, [activeScopeResult, onConfirmedScopeChange]);
+  const draftSignature = scopeSignature(draftScopeResult);
+  const hasPendingChanges = draftSignature !== lastConfirmedSignature;
 
   const toggleExpanded = (nodeId: string) => {
     setExpandedIds((current) => {
@@ -326,16 +359,31 @@ export const ScopeWorkspace = ({
     });
   };
 
-  const toggleChecked = (nodeId: string) => {
+  const setBranchChecked = (nodeId: string, checked: boolean) => {
+    const branchIds = descendantIds(nodeId, childrenByParent);
     setCheckedIds((current) => {
       const next = new Set(current);
-      if (next.has(nodeId)) {
-        next.delete(nodeId);
-      } else {
-        next.add(nodeId);
+      for (const id of branchIds) {
+        if (checked) {
+          next.add(id);
+        } else {
+          next.delete(id);
+        }
       }
       return next;
     });
+  };
+
+  const checkboxState = (node: ScopeScanNode): "checked" | "unchecked" | "mixed" => {
+    const ids = descendantIds(node.id, childrenByParent);
+    const selectedCount = ids.filter((id) => checkedIds.has(id)).length;
+    if (selectedCount === 0) {
+      return "unchecked";
+    }
+    if (selectedCount === ids.length) {
+      return "checked";
+    }
+    return "mixed";
   };
 
   const changeOrderMode = (mode: ScopeOrderMode) => {
@@ -369,6 +417,26 @@ export const ScopeWorkspace = ({
     });
   };
 
+  const dropCustomNode = (targetNodeId: string) => {
+    const sourceNodeId = dragNodeIdRef.current;
+    dragNodeIdRef.current = null;
+    if (sourceNodeId === null || sourceNodeId === targetNodeId || result === null) {
+      return;
+    }
+    setOrder({ mode: "custom", customNodeIds });
+    setCustomNodeIds((current) => {
+      const normalized = [...normalizeCustomOrder(current, result.nodes.map((node) => node.id))];
+      const from = normalized.indexOf(sourceNodeId);
+      const to = normalized.indexOf(targetNodeId);
+      if (from < 0 || to < 0) {
+        return Object.freeze(normalized);
+      }
+      const [item] = normalized.splice(from, 1);
+      normalized.splice(to, 0, item);
+      return Object.freeze(normalized);
+    });
+  };
+
   const revealNode = (nodeId: string) => {
     sendToPlugin({
       type: "SCOPE_REVEAL_NODE_REQUEST",
@@ -390,7 +458,7 @@ export const ScopeWorkspace = ({
     }
 
     if (mode === "manual") {
-      commitScopeDefinition({ mode: "manual", nodeIds: manualIdsFromInput(manualInput) });
+      commitScopeDefinition({ mode: "manual", nodeIds: [] });
       return;
     }
 
@@ -412,13 +480,6 @@ export const ScopeWorkspace = ({
     commitScopeDefinition({ mode: "depth-limited", maxDepth: depth });
   };
 
-  const changeManualInput = (value: string) => {
-    setManualInput(value);
-    if (scopeDefinition.mode === "manual") {
-      commitScopeDefinition({ mode: "manual", nodeIds: manualIdsFromInput(value) });
-    }
-  };
-
   const updateFilters = (next: Partial<ScopeFilterDefinition>) => {
     setFilters((current) => ({ ...current, ...next }));
   };
@@ -435,20 +496,45 @@ export const ScopeWorkspace = ({
     });
   };
 
+  const confirmScope = () => {
+    setConfirmedScope(draftScopeResult);
+    setLastConfirmedSignature(scopeSignature(draftScopeResult));
+    onConfirmedScopeChange?.(draftScopeResult);
+  };
+
+  const resetDraft = () => {
+    if (confirmedScope === null) {
+      setCheckedIds(new Set());
+      return;
+    }
+    setCheckedIds(new Set(confirmedScope.nodes.map((node) => node.id)));
+  };
+
   const renderRows = (nodes: readonly ScopeScanNode[]): ReactElement[] =>
     nodes.flatMap((node) => {
       const children = childrenByParent.get(node.id) ?? [];
       const isExpanded = expandedIds.has(node.id);
       const hasRenderedChildren = children.length > 0;
+      const state = checkboxState(node);
+      const isChecked = state === "checked";
       const row = (
         <div
           aria-label={`${node.name} ${node.type}`}
           className="scope-tree-row"
           data-depth={node.depth}
+          draggable={order.mode === "custom"}
           key={node.id}
           role="treeitem"
           tabIndex={0}
           aria-expanded={hasRenderedChildren ? isExpanded : undefined}
+          onDragOver={(event) => {
+            if (order.mode === "custom") {
+              event.preventDefault();
+            }
+          }}
+          onDrop={() => {
+            dropCustomNode(node.id);
+          }}
           onKeyDown={(event: KeyboardEvent<HTMLDivElement>) => {
             if (event.key === "ArrowRight" && hasRenderedChildren && !isExpanded) {
               event.preventDefault();
@@ -460,7 +546,7 @@ export const ScopeWorkspace = ({
             }
             if (event.key === " ") {
               event.preventDefault();
-              toggleChecked(node.id);
+              setBranchChecked(node.id, state !== "checked");
             }
           }}
           style={{ "--scope-depth": node.depth } as CSSProperties}
@@ -477,16 +563,33 @@ export const ScopeWorkspace = ({
             {hasRenderedChildren ? (isExpanded ? "v" : ">") : ""}
           </button>
           <input
-            aria-label={`Include ${node.name}`}
-            checked={checkedIds.has(node.id)}
-            onChange={() => {
-              toggleChecked(node.id);
+            aria-label={`Include in scope: ${node.name}`}
+            checked={isChecked}
+            data-state={state}
+            ref={(input) => {
+              if (input !== null) {
+                input.indeterminate = state === "mixed";
+              }
             }}
+            onChange={() => {
+              setBranchChecked(node.id, !isChecked);
+            }}
+            title="Include in scope"
             type="checkbox"
           />
-          <span aria-hidden="true" className="scope-node-icon">
-            {node.type.slice(0, 1)}
-          </span>
+          {order.mode === "custom" ? (
+            <button
+              aria-label={`Drag ${node.name} to reorder MotionOps target order`}
+              className="scope-drag-handle"
+              onDragStart={() => {
+                dragNodeIdRef.current = node.id;
+              }}
+              draggable
+              type="button"
+            >
+              ::
+            </button>
+          ) : null}
           <span className="scope-node-name">{node.name}</span>
           <span className="scope-node-type">{nodeTypeLabel(node.type)}</span>
           {node.visible ? null : <span className="scope-node-indicator">Hidden</span>}
@@ -501,26 +604,32 @@ export const ScopeWorkspace = ({
           >
             Reveal
           </button>
-          <button
-            aria-label={`Move ${node.name} up`}
-            className="scope-row-action"
-            onClick={() => {
-              moveCustomNode(node.id, -1);
-            }}
-            type="button"
-          >
-            Up
-          </button>
-          <button
-            aria-label={`Move ${node.name} down`}
-            className="scope-row-action"
-            onClick={() => {
-              moveCustomNode(node.id, 1);
-            }}
-            type="button"
-          >
-            Down
-          </button>
+          {order.mode === "custom" ? (
+            <>
+              <button
+                aria-label={`Move ${node.name} up in MotionOps target order`}
+                className="scope-icon-action"
+                onClick={() => {
+                  moveCustomNode(node.id, -1);
+                }}
+                title="Move up in MotionOps target order"
+                type="button"
+              >
+                ^
+              </button>
+              <button
+                aria-label={`Move ${node.name} down in MotionOps target order`}
+                className="scope-icon-action"
+                onClick={() => {
+                  moveCustomNode(node.id, 1);
+                }}
+                title="Move down in MotionOps target order"
+                type="button"
+              >
+                v
+              </button>
+            </>
+          ) : null}
         </div>
       );
 
@@ -532,32 +641,19 @@ export const ScopeWorkspace = ({
   return (
     <section className="scope-workspace" aria-label="Scope discovery">
       <div className="scope-workspace-header">
-        <h2>Scope</h2>
-        <div className="scope-header-actions">
-          <label className="scope-check-option">
-            <input
-              checked={selectionSyncEnabled}
-              onChange={(event) => {
-                setSelectionSyncEnabled(event.currentTarget.checked);
-              }}
-              type="checkbox"
-            />
-            <span>Selection sync</span>
-          </label>
-          <button
-            onClick={() => {
-              requestScan(scopeDefinition);
-            }}
-            type="button"
-          >
-            Rescan
-          </button>
+        <div>
+          <h2>Scope</h2>
+          <p>Define the target set MotionOps should use in the other workspaces.</p>
+        </div>
+        <div className="scope-summary" aria-label="Scope target summary">
+          <span>{String(draftScopeResult?.nodes.length ?? 0)} included</span>
+          <span>{ORDER_LABELS[order.mode]}</span>
+          <span>{SCOPE_MODE_OPTIONS.find((option) => option.mode === scopeDefinition.mode)?.label}</span>
         </div>
       </div>
 
-      <fieldset className="scope-mode-controls">
-        <legend>Scope mode</legend>
-        <div className="scope-mode-options">
+      <div className="scope-mode-controls" aria-label="Scope mode">
+        <div className="scope-mode-options" role="radiogroup" aria-label="Scope mode">
           {SCOPE_MODE_OPTIONS.map((option) => (
             <label className="scope-mode-option" key={option.mode}>
               <input
@@ -573,59 +669,117 @@ export const ScopeWorkspace = ({
             </label>
           ))}
         </div>
-        <label className="scope-field">
-          <span>Depth</span>
-          <input
-            aria-invalid={modeError !== null && scopeDefinition.mode === "depth-limited"}
-            disabled={scopeDefinition.mode !== "depth-limited"}
-            min={1}
-            onChange={(event) => {
-              changeDepth(event.currentTarget.value);
-            }}
-            step={1}
-            type="number"
-            value={depthInput}
-          />
-        </label>
-        <label className="scope-field scope-field-wide">
-          <span>Manual node IDs</span>
-          <input
-            disabled={scopeDefinition.mode !== "manual"}
-            onChange={(event) => {
-              changeManualInput(event.currentTarget.value);
-            }}
-            placeholder="12:34, 56:78"
-            type="text"
-            value={manualInput}
-          />
-        </label>
+        {scopeDefinition.mode === "depth-limited" ? (
+          <label className="scope-field">
+            <span>Depth</span>
+            <input
+              aria-invalid={modeError !== null}
+              min={1}
+              onChange={(event) => {
+                changeDepth(event.currentTarget.value);
+              }}
+              step={1}
+              type="number"
+              value={depthInput}
+            />
+          </label>
+        ) : null}
+        {scopeDefinition.mode === "manual" ? (
+          <p className="scope-field-note">Manual mode uses the hierarchy checkboxes below. Raw Figma node IDs are hidden from the normal workflow.</p>
+        ) : null}
         {modeError === null ? null : <p className="scope-mode-error">{modeError}</p>}
-      </fieldset>
+      </div>
 
-      <fieldset className="scope-order-controls">
-        <legend>Target order</legend>
+      <div className="scope-toolbar">
+        <label className="scope-field scope-field-wide">
+          <span>Search</span>
+          <input
+            onChange={(event) => {
+              updateFilters({ search: event.currentTarget.value });
+            }}
+            placeholder="Layer name"
+            type="search"
+            value={filters.search}
+          />
+        </label>
+        <label className="scope-check-option">
+          <input
+            checked={filters.visibleOnly}
+            onChange={(event) => {
+              updateFilters({ visibleOnly: event.currentTarget.checked });
+            }}
+            type="checkbox"
+          />
+          <span>Visible only</span>
+        </label>
+        <label className="scope-check-option">
+          <input
+            checked={filters.unlockedOnly}
+            onChange={(event) => {
+              updateFilters({ unlockedOnly: event.currentTarget.checked });
+            }}
+            type="checkbox"
+          />
+          <span>Unlocked only</span>
+        </label>
         <label className="scope-field">
           <span>Order</span>
-          <select
-            aria-label="Target order"
-            onChange={(event) => {
-              changeOrderMode(event.currentTarget.value as ScopeOrderMode);
+          <Select
+            label="Target order"
+            onChange={(value) => {
+              changeOrderMode(value);
             }}
+            options={[
+              ...AUTOMATIC_SCOPE_ORDER_MODES.map((mode) => ({ value: mode, label: ORDER_LABELS[mode] })),
+              { value: "custom" as const, label: ORDER_LABELS.custom }
+            ]}
             value={order.mode}
-          >
-            {AUTOMATIC_SCOPE_ORDER_MODES.map((mode) => (
-              <option key={mode} value={mode}>
-                {ORDER_LABELS[mode]}
-              </option>
-            ))}
-            <option value="custom">{ORDER_LABELS.custom}</option>
-          </select>
+          />
         </label>
-        <span className="scope-order-current">Current order: {ORDER_LABELS[order.mode]}</span>
-        <button disabled={order.mode !== "custom"} onClick={resetCustomOrder} type="button">
-          Reset custom order
+        <button
+          className="secondary-action"
+          disabled={!hasActiveScopeFilters(filters)}
+          onClick={() => {
+            setFilters(createDefaultScopeFilters());
+          }}
+          type="button"
+        >
+          Clear filters
         </button>
-      </fieldset>
+        <button
+          className="secondary-action"
+          onClick={() => {
+            requestScan(scopeDefinition);
+          }}
+          type="button"
+        >
+          Refresh
+        </button>
+      </div>
+
+      {nodeTypes.length > 0 ? (
+        <div className="scope-type-filters" aria-label="Node type filters">
+          {nodeTypes.map((type) => (
+            <label className="scope-check-option" key={type}>
+              <input
+                checked={filters.nodeTypes.includes(type)}
+                onChange={() => {
+                  toggleNodeTypeFilter(type);
+                }}
+                type="checkbox"
+              />
+              <span>{nodeTypeLabel(type)}</span>
+            </label>
+          ))}
+        </div>
+      ) : null}
+
+      {order.mode === "custom" ? (
+        <div className="scope-order-note">
+          <span>Custom order changes MotionOps processing order only, not Figma layer order.</span>
+          <button onClick={resetCustomOrder} type="button">Reset custom order</button>
+        </div>
+      ) : null}
 
       {viewState.status === "idle" || viewState.status === "scanning" ? (
         <div aria-live="polite" className="scope-state" data-testid="scope-loading">
@@ -651,7 +805,7 @@ export const ScopeWorkspace = ({
             }}
             type="button"
           >
-            Rescan
+            Refresh
           </button>
         </div>
       ) : null}
@@ -664,99 +818,19 @@ export const ScopeWorkspace = ({
 
       {viewState.status === "error" ? (
         <div className="scope-state scope-state-error" role="alert">
-          <span>{viewState.message}</span>
+          <span>{lastMessage?.type === "PLUGIN_ERROR" ? lastMessage.message : "Scope scan failed."}</span>
           <button
             onClick={() => {
               requestScan(scopeDefinition);
             }}
             type="button"
           >
-            Retry scan
+            Retry
           </button>
         </div>
       ) : null}
 
       {revealMessage === null ? null : <div className="scope-state">{revealMessage}</div>}
-
-      {result !== null ? (
-        <fieldset className="scope-filter-controls">
-          <legend>Filters</legend>
-          <label className="scope-field scope-field-wide">
-            <span>Search layer name</span>
-            <input
-              onChange={(event) => {
-                updateFilters({ search: event.currentTarget.value });
-              }}
-              placeholder="Case-insensitive"
-              type="search"
-              value={filters.search}
-            />
-          </label>
-          <label className="scope-check-option">
-            <input
-              checked={filters.visibleOnly}
-              onChange={(event) => {
-                updateFilters({ visibleOnly: event.currentTarget.checked });
-              }}
-              type="checkbox"
-            />
-            <span>Visible only</span>
-          </label>
-          <label className="scope-check-option">
-            <input
-              checked={filters.unlockedOnly}
-              onChange={(event) => {
-                updateFilters({ unlockedOnly: event.currentTarget.checked });
-              }}
-              type="checkbox"
-            />
-            <span>Unlocked only</span>
-          </label>
-          <label className="scope-check-option">
-            <input
-              checked={filters.excludeHidden}
-              onChange={(event) => {
-                updateFilters({ excludeHidden: event.currentTarget.checked });
-              }}
-              type="checkbox"
-            />
-            <span>Exclude hidden</span>
-          </label>
-          <label className="scope-check-option">
-            <input
-              checked={filters.excludeLocked}
-              onChange={(event) => {
-                updateFilters({ excludeLocked: event.currentTarget.checked });
-              }}
-              type="checkbox"
-            />
-            <span>Exclude locked</span>
-          </label>
-          <div className="scope-type-filters" aria-label="Node type filters">
-            {nodeTypes.map((type) => (
-              <label className="scope-check-option" key={type}>
-                <input
-                  checked={filters.nodeTypes.includes(type)}
-                  onChange={() => {
-                    toggleNodeTypeFilter(type);
-                  }}
-                  type="checkbox"
-                />
-                <span>{nodeTypeLabel(type)}</span>
-              </label>
-            ))}
-          </div>
-          <button
-            disabled={!hasActiveScopeFilters(filters)}
-            onClick={() => {
-              setFilters(createDefaultScopeFilters());
-            }}
-            type="button"
-          >
-            Clear filters
-          </button>
-        </fieldset>
-      ) : null}
 
       {filteredResult !== null && filteredResult.nodes.length === 0 ? (
         <div className="scope-state" data-testid="scope-empty">
@@ -765,15 +839,54 @@ export const ScopeWorkspace = ({
             ? "Select one or more supported layers in Figma to scan Scope targets."
             : filteredResult.issues.length > 0 && (result?.nodes.length ?? 0) === 0
               ? filteredResult.issues[0].message
-              : "No eligible Scope targets match the current selection and filters."}
+              : "No eligible Scope targets match the current selection and filters. Adjust filters or refresh Scope."}
         </div>
       ) : null}
 
       {filteredResult !== null && filteredResult.nodes.length > 0 ? (
-        <div aria-label="Scope hierarchy" className="scope-tree" role="tree">
-          {renderRows(roots)}
-        </div>
+        <>
+          <div className="scope-selection-tools">
+            <span>{String(draftScopeResult?.nodes.length ?? 0)} of {String(filteredResult.nodes.length)} targets included</span>
+            <button
+              onClick={() => {
+                setCheckedIds(new Set(filteredResult.nodes.map((node) => node.id)));
+              }}
+              type="button"
+            >
+              Select all
+            </button>
+            <button
+              onClick={() => {
+                setCheckedIds(new Set());
+              }}
+              type="button"
+            >
+              Deselect all
+            </button>
+          </div>
+          <div aria-label="Scope hierarchy" className="scope-tree" role="tree">
+            {renderRows(roots)}
+          </div>
+        </>
       ) : null}
+
+      <div className="scope-action-bar">
+        <span>
+          {hasPendingChanges
+            ? "Scope draft has pending changes."
+            : confirmedScope === null
+              ? "Confirm a Scope to share it with the other workspaces."
+              : "Confirmed Scope is up to date."}
+        </span>
+        <button className="secondary-action" disabled={!hasPendingChanges} onClick={resetDraft} type="button">
+          Reset
+        </button>
+        <button className="primary-action" disabled={draftScopeResult === null} onClick={confirmScope} type="button">
+          Confirm scope
+        </button>
+      </div>
+
+      <p className="scope-field-note">Animated-only filtering is unavailable until Scope scans can read Motion presence reliably.</p>
     </section>
   );
 };

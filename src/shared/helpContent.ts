@@ -9,7 +9,8 @@ export const HELP_SECTIONS: readonly HelpSection[] = [
     items: [
       "MotionOps helps review, edit, sequence, QA, and hand off native Figma Motion data from an explicit Scope.",
       "The five workspaces are Scope, Inspect, Edit, Sequence, and Review.",
-      "Scope defines the target set; MotionOps does not scan the whole document in the background.",
+      "Scope defines a draft target set from the current selection, then shares it only after Confirm scope.",
+      "Manual Scope uses hierarchy checkboxes instead of raw Figma node IDs.",
       "Preview before Apply is the normal write path, and stale data blocks guarded writes.",
       "Native Figma Motion remains the source of truth after every read, write, and reread."
     ]

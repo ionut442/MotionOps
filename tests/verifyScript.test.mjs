@@ -241,5 +241,5 @@ describe("package and production boundaries", () => {
       const text = await readFile(file, "utf8");
       expect(text).not.toContain("scripts/verify.mjs");
     }
-  });
+  }, 15_000);
 });

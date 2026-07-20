@@ -29,7 +29,6 @@ import { HelpDrawer } from "./components/HelpDrawer";
 import type { ScopeScanResult } from "../domain/scopeScan";
 import { useApplicationStateDispatch } from "./applicationStateContext";
 
-type ConnectionState = "waiting" | "connected" | "error";
 type ShellDensity = "wide" | "narrow";
 
 const createRequestId = (): string =>
@@ -104,7 +103,7 @@ const WorkspaceNavigation = ({
   };
 
   return (
-    <div aria-label="Workspace navigation" aria-orientation="vertical" className="workspace-tabs" role="tablist">
+    <div aria-label="Workspace navigation" aria-orientation="horizontal" className="workspace-tabs" role="tablist">
       {WORKSPACES.map((workspace) => {
         const isActive = workspace.id === activeWorkspace;
         return (
@@ -248,9 +247,7 @@ const WorkspacePanel = ({
 
 export const App = ({ contextDrawer = null }: { contextDrawer?: ReactNode }) => {
   const dispatchApplicationEvent = useApplicationStateDispatch();
-  const [connectionState, setConnectionState] = useState<ConnectionState>("waiting");
   const [lastMessage, setLastMessage] = useState<PluginToUiMessage | null>(null);
-  const [lastRequestId, setLastRequestId] = useState<string | null>(null);
   const [windowSize, setWindowSize] = useState<PluginWindowSize>(initialWindowSize);
   const [isResizing, setIsResizing] = useState(false);
   const [activeWorkspace, setActiveWorkspace] = useState<WorkspaceId>(INITIAL_WORKSPACE_ID);
@@ -273,8 +270,7 @@ export const App = ({ contextDrawer = null }: { contextDrawer?: ReactNode }) => 
       }
 
       setLastMessage(maybeMessage);
-      setConnectionState(maybeMessage.type === "PLUGIN_ERROR" ? "error" : "connected");
-      if (maybeMessage.type === "PLUGIN_READY") {
+      if (maybeMessage.type !== "PLUGIN_ERROR") {
         dispatchApplicationEvent({ type: "INITIALIZATION_SUCCEEDED" });
       }
     };
@@ -313,7 +309,6 @@ export const App = ({ contextDrawer = null }: { contextDrawer?: ReactNode }) => 
       return;
     }
 
-    setLastRequestId(requestId);
     sendToPlugin(message);
   };
 
@@ -388,13 +383,14 @@ export const App = ({ contextDrawer = null }: { contextDrawer?: ReactNode }) => 
         }}
       />
 
+      <nav className="shell-nav" aria-label="Workspace navigation region">
+        <WorkspaceNavigation
+          activeWorkspace={activeWorkspace}
+          onWorkspaceChange={setActiveWorkspace}
+        />
+      </nav>
+
       <div className="shell-body">
-        <nav className="shell-nav" aria-label="Workspace navigation region">
-          <WorkspaceNavigation
-            activeWorkspace={activeWorkspace}
-            onWorkspaceChange={setActiveWorkspace}
-          />
-        </nav>
         <main className="shell-main" aria-label="MotionOps workspace" tabIndex={-1}>
           <WorkspacePanel
             activeScope={activeScope}
@@ -406,18 +402,6 @@ export const App = ({ contextDrawer = null }: { contextDrawer?: ReactNode }) => 
         </main>
         {activeDrawer === null ? null : <div className="shell-context">{activeDrawer}</div>}
       </div>
-
-      <footer className="shell-footer" aria-label="MotionOps footer">
-        <span className={`connection-state connection-state-${connectionState}`} data-testid="connection-state">
-          {connectionState === "waiting"
-            ? "Waiting for plugin"
-            : connectionState === "connected"
-              ? "Connected"
-              : "Plugin warning"}
-        </span>
-        <span data-testid="last-message">{lastMessage?.type ?? "No plugin message"}</span>
-        <span data-testid="last-request">{lastRequestId ?? "No resize request"}</span>
-      </footer>
 
       <button
         aria-label="Resize plugin window"

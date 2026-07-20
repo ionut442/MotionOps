@@ -25,6 +25,7 @@ import { createApplicationStateError } from "./applicationState";
 import { useApplicationStateDispatch } from "./applicationStateContext";
 import { ChangePreview, type ChangePreviewPlan } from "./components/ChangePreview";
 import { ContextDrawerShell } from "./components/ContextDrawerShell";
+import { Select } from "./components/ui";
 
 interface SequenceWorkspaceProps {
   readonly activeScope: ScopeScanResult | null;
@@ -298,17 +299,18 @@ export const SequenceWorkspace = ({
           <div className="sequence-toolbar" aria-label="Sequencer controls">
             <label className="scope-field">
               <span>Scoped node</span>
-              <select
+              <Select
+                label="Scoped node"
                 value={selectedNodeId}
-                onChange={(event) => {
-                  setSelectedNodeId(event.currentTarget.value);
+                onChange={(value) => {
+                  setSelectedNodeId(value);
                   setTimeout(() => { rebuildDraft(snapshots); }, 0);
                 }}
-              >
-                {snapshots.map((snapshot) => (
-                  <option key={snapshot.nodeId} value={snapshot.nodeId}>{activeScope?.nodes.find((node) => node.id === snapshot.nodeId)?.name ?? snapshot.nodeId}</option>
-                ))}
-              </select>
+                options={snapshots.map((snapshot) => ({
+                  value: snapshot.nodeId,
+                  label: activeScope?.nodes.find((node) => node.id === snapshot.nodeId)?.name ?? snapshot.nodeId
+                }))}
+              />
             </label>
             <label className="scope-field">
               <span>Delta (ms)</span>
@@ -329,13 +331,18 @@ export const SequenceWorkspace = ({
             <button onClick={() => { setDraft(distributeSelection(draft, "starts")); }} type="button">Distribute</button>
             <label className="scope-field">
               <span>Stagger mode</span>
-              <select value={staggerTimingMode} onChange={(event) => { setStaggerTimingMode(event.currentTarget.value as StaggerTimingMode); }}>
-                <option value="fixed-interval">Fixed interval</option>
-                <option value="total-duration">Total duration</option>
-                <option value="fixed-overlap">Fixed overlap</option>
-                <option value="sequential-after-end">After previous end</option>
-                <option value="start-before-previous-end">Before previous end</option>
-              </select>
+              <Select
+                label="Stagger mode"
+                onChange={setStaggerTimingMode}
+                options={[
+                  { value: "fixed-interval", label: "Fixed interval" },
+                  { value: "total-duration", label: "Total duration" },
+                  { value: "fixed-overlap", label: "Fixed overlap" },
+                  { value: "sequential-after-end", label: "After previous end" },
+                  { value: "start-before-previous-end", label: "Before previous end" }
+                ]}
+                value={staggerTimingMode}
+              />
             </label>
             <label className="scope-field">
               <span>{staggerTimingMode === "total-duration" ? "Total" : staggerTimingMode === "sequential-after-end" ? "Gap" : "Amount"} (ms)</span>
@@ -343,18 +350,28 @@ export const SequenceWorkspace = ({
             </label>
             <label className="scope-field">
               <span>Policy</span>
-              <select value={staggerDurationPolicy} onChange={(event) => { setStaggerDurationPolicy(event.currentTarget.value as StaggerDurationPolicy); }}>
-                <option value="preserve">Preserve durations</option>
-                <option value="scale-to-fit">Scale to fit</option>
-              </select>
+              <Select
+                label="Policy"
+                onChange={setStaggerDurationPolicy}
+                options={[
+                  { value: "preserve", label: "Preserve durations" },
+                  { value: "scale-to-fit", label: "Scale to fit" }
+                ]}
+                value={staggerDurationPolicy}
+              />
             </label>
             <label className="scope-field">
               <span>Anchor</span>
-              <select value={staggerAnchor} onChange={(event) => { setStaggerAnchor(event.currentTarget.value as StaggerAnchor); }}>
-                <option value="preserve-first-start">First start</option>
-                <option value="preserve-last-end">Last end</option>
-                <option value="extend-timeline">Extend timeline</option>
-              </select>
+              <Select
+                label="Anchor"
+                onChange={setStaggerAnchor}
+                options={[
+                  { value: "preserve-first-start", label: "First start" },
+                  { value: "preserve-last-end", label: "Last end" },
+                  { value: "extend-timeline", label: "Extend timeline" }
+                ]}
+                value={staggerAnchor}
+              />
             </label>
             <button onClick={applyStaggerToDraft} type="button">Stagger</button>
             <label className="scope-field">

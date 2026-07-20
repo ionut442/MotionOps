@@ -1,7 +1,7 @@
 import React from "react";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeAll, describe, expect, test } from "vitest";
+import { afterEach, beforeAll, describe, expect, test, vi } from "vitest";
 import { App } from "../src/ui/App";
 import { ApplicationStateProvider } from "../src/ui/ApplicationStateProvider";
 import {
@@ -65,6 +65,12 @@ const renderApp = (initialState?: ApplicationState) => {
   return { container, probe };
 };
 
+const postPluginMessage = (message: unknown) => {
+  act(() => {
+    window.dispatchEvent(new MessageEvent("message", { data: { pluginMessage: message } }));
+  });
+};
+
 afterEach(() => {
   for (const root of roots.splice(0)) {
     act(() => {
@@ -102,6 +108,31 @@ describe("global header", () => {
         workspace.label
       );
     }
+  });
+
+  test("workspace navigation is horizontal and no technical footer is rendered", () => {
+    const { container } = renderApp({ status: "synced" });
+    expect(container.querySelector('[role="tablist"]')?.getAttribute("aria-orientation")).toBe("horizontal");
+    expect(container.querySelector(".shell-footer")).toBeNull();
+    expect(container.querySelector('[data-testid="connection-state"]')).toBeNull();
+    expect(container.querySelector('[data-testid="last-message"]')).toBeNull();
+    expect(container.querySelector('[data-testid="last-request"]')).toBeNull();
+  });
+
+  test("a successful plugin message moves initializing status to synced", () => {
+    vi.spyOn(window.parent, "postMessage").mockImplementation(() => undefined);
+    const { container } = renderApp();
+
+    expect(container.querySelector('[data-testid="document-status"]')?.textContent).toContain("Initializing");
+    postPluginMessage({
+      type: "SCOPE_SCAN_RESULT",
+      requestId: "ignored",
+      result: { roots: [], nodes: [], issues: [] }
+    });
+
+    expect(container.querySelector('[data-testid="document-status"]')?.textContent).toContain("Synced");
+    expect(container.textContent).not.toContain("Connected");
+    expect(container.textContent).not.toContain("SCOPE_SCAN_RESULT");
   });
 
   test("workspace change does not change lifecycle state", () => {

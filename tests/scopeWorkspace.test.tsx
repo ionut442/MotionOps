@@ -146,6 +146,23 @@ const requireValue = <T,>(value: T | null | undefined, message: string): T => {
   return value;
 };
 
+const chooseComboboxOption = (name: string, optionName: string) => {
+  const trigger = requireValue(
+    document.querySelector(`[role="combobox"][aria-label="${name}"]`),
+    `Expected ${name} combobox.`
+  );
+  act(() => {
+    trigger.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  });
+  const option = requireValue(
+    Array.from(document.querySelectorAll('[role="option"]')).find((entry) => entry.textContent === optionName),
+    `Expected ${optionName} option.`
+  );
+  act(() => {
+    option.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  });
+};
+
 afterEach(() => {
   vi.restoreAllMocks();
   for (const root of roots.splice(0)) {
@@ -202,7 +219,7 @@ describe("Scope workspace hierarchy", () => {
       message: "Safe scanner failure."
     });
     expect(error.container.querySelector('[role="alert"]')?.textContent).toContain("Safe scanner failure.");
-    expect(error.container.querySelector('[role="alert"]')?.textContent).toContain("Retry scan");
+    expect(error.container.querySelector('[role="alert"]')?.textContent).toContain("Retry");
   });
 
   test("renders hierarchy rows with expansion, checkbox, type, hidden, and locked data", () => {
@@ -225,10 +242,10 @@ describe("Scope workspace hierarchy", () => {
     expect(container.querySelectorAll('[role="treeitem"]')).toHaveLength(4);
     expect(container.textContent).toContain("Hidden");
     expect(container.textContent).toContain("Locked");
-    expect(container.textContent).not.toMatch(/animated|motion source|compatibility/i);
+    expect(container.textContent).not.toMatch(/motion source|compatibility/i);
 
     const checkbox = requireValue(
-      container.querySelector<HTMLInputElement>('input[aria-label="Include Hidden Copy"]'),
+      container.querySelector<HTMLInputElement>('input[aria-label="Include in scope: Hidden Copy"]'),
       "Expected Hidden Copy checkbox."
     );
     expect(checkbox.checked).toBe(true);
@@ -258,7 +275,7 @@ describe("Scope workspace hierarchy", () => {
       controlsRow.dispatchEvent(new KeyboardEvent("keydown", { key: " ", bubbles: true }));
     });
     const checkbox = requireValue(
-      container.querySelector<HTMLInputElement>('input[aria-label="Include Controls"]'),
+      container.querySelector<HTMLInputElement>('input[aria-label="Include in scope: Controls"]'),
       "Expected Controls checkbox."
     );
     expect(checkbox.checked).toBe(false);
@@ -290,14 +307,8 @@ describe("Scope workspace hierarchy", () => {
       setInputValue(depth, "3");
     });
     choose("Manual");
-    const manual = requireValue(
-      container.querySelector<HTMLInputElement>('input[placeholder="12:34, 56:78"]'),
-      "Expected manual node ID input."
-    );
-    act(() => {
-      setInputValue(manual, "1:1, 2:2 1:1");
-    });
-    choose("Selected object");
+    expect(container.textContent).toContain("Manual mode uses the hierarchy checkboxes");
+    choose("Current selection");
 
     expect(getScopeRequests().map((request) => request.scope)).toEqual([
       { mode: "current-selection" },
@@ -305,13 +316,12 @@ describe("Scope workspace hierarchy", () => {
       { mode: "all-descendants" },
       { mode: "depth-limited", maxDepth: 2 },
       { mode: "depth-limited", maxDepth: 3 },
-      { mode: "manual", nodeIds: [] },
-      { mode: "manual", nodeIds: ["1:1", "2:2"] },
+      { mode: "all-descendants" },
       { mode: "current-selection" }
     ]);
   });
 
-  test("validates depth input while real order and selection-sync controls are present", () => {
+  test("validates depth input while order controls remain visible and sync is automatic", () => {
     const { container, getScopeRequests } = renderApp();
     const depthMode = requireValue(
       Array.from(container.querySelectorAll<HTMLInputElement>('input[name="scope-mode"]')).find(
@@ -334,7 +344,8 @@ describe("Scope workspace hierarchy", () => {
 
     expect(container.textContent).toContain("Depth must be an integer of at least 1.");
     expect(getScopeRequests()).toHaveLength(requestCount);
-    expect(container.textContent).toMatch(/Target order|Selection sync/i);
+    expect(container.textContent).toMatch(/Order|Refresh/i);
+    expect(container.textContent).not.toContain("Selection sync");
   });
 
   test("changes automatic ordering and custom ordering locally without rescanning", () => {
@@ -345,29 +356,18 @@ describe("Scope workspace hierarchy", () => {
       result: sampleResult
     });
     const requestCount = getScopeRequests().length;
-    const order = requireValue(
-      container.querySelector<HTMLSelectElement>('select[aria-label="Target order"]'),
-      "Expected target order select."
-    );
+    chooseComboboxOption("Target order", "Left to right");
+    expect(container.textContent).toContain("Left to right");
 
-    act(() => {
-      Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")?.set?.call(order, "left-to-right");
-      order.dispatchEvent(new Event("change", { bubbles: true }));
-    });
-    expect(container.textContent).toContain("Current order: Left to right");
-
-    act(() => {
-      Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")?.set?.call(order, "custom");
-      order.dispatchEvent(new Event("change", { bubbles: true }));
-    });
+    chooseComboboxOption("Target order", "Custom");
     const moveDown = requireValue(
-      Array.from(container.querySelectorAll("button")).find((button) => button.getAttribute("aria-label") === "Move Checkout Frame down"),
+      Array.from(container.querySelectorAll("button")).find((button) => button.getAttribute("aria-label") === "Move Checkout Frame down in MotionOps target order"),
       "Expected move down button."
     );
     act(() => {
       moveDown.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
-    expect(container.textContent).toContain("Current order: Custom");
+    expect(container.textContent).toContain("Custom order changes MotionOps processing order");
     expect(getScopeRequests()).toHaveLength(requestCount);
 
     const reset = requireValue(
@@ -377,7 +377,7 @@ describe("Scope workspace hierarchy", () => {
     act(() => {
       reset.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
-    expect(container.textContent).toContain("Current order: Left to right");
+    expect(container.textContent).toContain("Left to right");
   });
 
   test("reveals nodes through the plugin boundary and reports safe results", () => {
@@ -411,7 +411,8 @@ describe("Scope workspace hierarchy", () => {
     expect(container.textContent).toContain("Scope node selected and revealed.");
   });
 
-  test("handles progress, cancellation, stale selection changes, rescan, and selection sync", () => {
+  test("handles progress, cancellation, stale selection changes, refresh, and automatic selection sync", () => {
+    vi.useFakeTimers();
     const { container, getScopeRequestId, getScopeRequests, postMessage } = renderApp();
     const firstRequest = getScopeRequestId();
     postPluginMessage({
@@ -440,8 +441,8 @@ describe("Scope workspace hierarchy", () => {
     expect(container.textContent).toContain("Scope scan cancelled");
 
     const rescan = requireValue(
-      Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Rescan"),
-      "Expected rescan button."
+      Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Refresh"),
+      "Expected refresh button."
     );
     act(() => {
       rescan.dispatchEvent(new MouseEvent("click", { bubbles: true }));
@@ -452,15 +453,12 @@ describe("Scope workspace hierarchy", () => {
     postPluginMessage({ type: "SCOPE_SELECTION_CHANGED", selectionIds: ["other"] });
     expect(container.querySelector('[data-testid="scope-stale"]')?.textContent).toContain("selection");
 
-    const sync = requireValue(
-      Array.from(container.querySelectorAll("label")).find((label) => label.textContent === "Selection sync")?.querySelector<HTMLInputElement>("input"),
-      "Expected selection sync input."
-    );
-    act(() => {
-      sync.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    });
     postPluginMessage({ type: "SCOPE_SELECTION_CHANGED", selectionIds: ["next"] });
+    act(() => {
+      vi.advanceTimersByTime(80);
+    });
     expect(getScopeRequests()).toHaveLength(requestCount + 1);
+    vi.useRealTimers();
   });
 
   test("applies filters locally and clears them without rescanning", () => {
@@ -529,18 +527,18 @@ describe("Scope workspace hierarchy", () => {
     expect(container.textContent).toContain("Hidden");
     expect(container.textContent).toContain("Locked");
 
-    const excludeHiddenLabel = requireValue(
+    const visibleOnlyLabel = requireValue(
       Array.from(container.querySelectorAll("label")).find(
-        (label) => label.textContent === "Exclude hidden"
+        (label) => label.textContent === "Visible only"
       ),
-      "Expected exclude hidden label."
+      "Expected visible only label."
     );
-    const excludeHiddenInput = requireValue(
-      excludeHiddenLabel.querySelector<HTMLInputElement>("input"),
-      "Expected exclude hidden input."
+    const visibleOnlyInput = requireValue(
+      visibleOnlyLabel.querySelector<HTMLInputElement>("input"),
+      "Expected visible only input."
     );
     act(() => {
-      excludeHiddenInput.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      visibleOnlyInput.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
     expect(container.textContent).not.toContain("Hidden Copy");
     expect(container.textContent).toContain("Locked Icon");

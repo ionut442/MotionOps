@@ -9,6 +9,7 @@ import { ChangePreview, type ChangePreviewPlan } from "./components/ChangePrevie
 import { ContextDrawerShell } from "./components/ContextDrawerShell";
 import { useApplicationStateDispatch } from "./applicationStateContext";
 import { copyHandoffText, exportHandoffFile } from "./handoffExport";
+import { Select } from "./components/ui";
 
 interface ReviewWorkspaceProps {
   readonly activeScope: ScopeScanResult | null;
@@ -299,7 +300,22 @@ export const ReviewWorkspace = ({
         <section className="review-panel" aria-label="QA">
           <div className="review-actions">
             <button onClick={runQa} type="button">Run QA</button>
-            <label className="scope-field"><span>Filter</span><select value={qaFilter} onChange={(event) => { setQaFilter(event.currentTarget.value as QaFilter); }}><option value="all">All</option><option value="open">Open</option><option value="error">Error</option><option value="warning">Warning</option><option value="suggestion">Suggestion</option><option value="information">Information</option></select></label>
+            <label className="scope-field">
+              <span>Filter</span>
+              <Select
+                label="QA filter"
+                onChange={setQaFilter}
+                options={[
+                  { value: "all", label: "All" },
+                  { value: "open", label: "Open" },
+                  { value: "error", label: "Error" },
+                  { value: "warning", label: "Warning" },
+                  { value: "suggestion", label: "Suggestion" },
+                  { value: "information", label: "Information" }
+                ]}
+                value={qaFilter}
+              />
+            </label>
           </div>
           {qaResult === null ? <div className="scope-state">Run QA to evaluate active Scope Motion against the selected standards.</div> : (
             <>

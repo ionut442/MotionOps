@@ -16,6 +16,7 @@ import { createApplicationStateError } from "./applicationState";
 import { useApplicationStateDispatch } from "./applicationStateContext";
 import { ChangePreview, type ChangePreviewPlan } from "./components/ChangePreview";
 import { ContextDrawerShell } from "./components/ContextDrawerShell";
+import { Select } from "./components/ui";
 
 interface EditWorkspaceProps {
   readonly activeScope: ScopeScanResult | null;
@@ -575,18 +576,17 @@ export const EditWorkspace = ({
               <legend>Target</legend>
               <label className="scope-field">
                 <span>Scoped node</span>
-                <select
+                <Select
+                  label="Scoped node"
                   value={selectedSnapshot === null ? "" : selectedSnapshot.nodeId}
-                  onChange={(event) => {
-                    setSelectedNodeId(event.currentTarget.value);
+                  onChange={(value) => {
+                    setSelectedNodeId(value);
                   }}
-                >
-                  {snapshots.map((snapshot) => (
-                    <option key={snapshot.nodeId} value={snapshot.nodeId}>
-                      {nodeLabel(activeScope, snapshot.nodeId)} ({snapshot.sources.kind})
-                    </option>
-                  ))}
-                </select>
+                  options={snapshots.map((snapshot) => ({
+                    value: snapshot.nodeId,
+                    label: `${nodeLabel(activeScope, snapshot.nodeId)} (${snapshot.sources.kind})`
+                  }))}
+                />
               </label>
               <div className="edit-target-list" aria-label="Edit targets">
                 {targetOptions.length === 0 ? (
@@ -721,19 +721,19 @@ const TimingFields = ({
   <>
     <label className="scope-field">
       <span>Operation</span>
-      <select
+      <Select
+        label="Operation"
         value={mode}
-        onChange={(event) => {
-          setMode(event.currentTarget.value as TimingMode);
-        }}
-      >
-        <option value="duration-start">Exact duration, preserve start</option>
-        <option value="duration-end">Exact duration, preserve end</option>
-        <option value="delay-add">Add delay</option>
-        <option value="delay-remove">Remove delay</option>
-        <option value="delay-replace">Replace delay</option>
-        <option value="scale">Overall timing scale</option>
-      </select>
+        onChange={setMode}
+        options={[
+          { value: "duration-start", label: "Exact duration, preserve start" },
+          { value: "duration-end", label: "Exact duration, preserve end" },
+          { value: "delay-add", label: "Add delay" },
+          { value: "delay-remove", label: "Remove delay" },
+          { value: "delay-replace", label: "Replace delay" },
+          { value: "scale", label: "Overall timing scale" }
+        ]}
+      />
     </label>
     {mode === "duration-start" || mode === "duration-end" ? (
       <label className="scope-field">
@@ -804,19 +804,19 @@ const EasingFields = ({
     <>
       <label className="scope-field">
         <span>Easing</span>
-        <select
+        <Select
+          label="Easing"
           value={easingMode}
-          onChange={(event) => {
-            setEasingMode(event.currentTarget.value);
-          }}
-        >
-          <option value="linear">Linear</option>
-          <option value="EASE_IN">Ease in</option>
-          <option value="EASE_OUT">Ease out</option>
-          <option value="EASE_IN_AND_OUT">Ease in and out</option>
-          <option value="custom">Custom cubic-bezier</option>
-          <option value="spring">Spring (read-only)</option>
-        </select>
+          onChange={setEasingMode}
+          options={[
+            { value: "linear", label: "Linear" },
+            { value: "EASE_IN", label: "Ease in" },
+            { value: "EASE_OUT", label: "Ease out" },
+            { value: "EASE_IN_AND_OUT", label: "Ease in and out" },
+            { value: "custom", label: "Custom cubic-bezier" },
+            { value: "spring", label: "Spring (read-only)" }
+          ]}
+        />
       </label>
       {easingMode === "custom" ? (
         <label className="scope-field">
@@ -886,17 +886,17 @@ const CopyPasteFields = ({
     <section className="edit-copy-paste-section" aria-label="Copy Motion">
       <label className="scope-field">
         <span>Copy mode</span>
-        <select
+        <Select
+          label="Copy mode"
           value={copyMode}
-          onChange={(event) => {
-            setCopyMode(event.currentTarget.value as MotionClipboardCopyMode);
-          }}
-        >
-          <option value="complete">Complete animation</option>
-          <option value="timing-only">Timing only</option>
-          <option value="easing-only">Easing only</option>
-          <option value="selected-tracks">Selected tracks</option>
-        </select>
+          onChange={setCopyMode}
+          options={[
+            { value: "complete", label: "Complete animation" },
+            { value: "timing-only", label: "Timing only" },
+            { value: "easing-only", label: "Easing only" },
+            { value: "selected-tracks", label: "Selected tracks" }
+          ]}
+        />
       </label>
       <button className="edit-secondary-action" onClick={replaceClipboard} type="button">
         Replace clipboard
@@ -917,30 +917,30 @@ const CopyPasteFields = ({
     <section className="edit-copy-paste-section" aria-label="Paste Motion">
       <label className="scope-field">
         <span>Paste mode</span>
-        <select
+        <Select
+          label="Paste mode"
           value={pasteMode}
-          onChange={(event) => {
-            setPasteMode(event.currentTarget.value as PasteMode);
-          }}
-        >
-          <option value="replace">Replace existing animation</option>
-          <option value="merge-compatible">Merge compatible tracks</option>
-          <option value="add-missing-only">Add missing only</option>
-          <option value="preserve-timing">Paste timing, keep values</option>
-          <option value="preserve-easing">Paste easing, keep timing and values</option>
-        </select>
+          onChange={setPasteMode}
+          options={[
+            { value: "replace", label: "Replace existing animation" },
+            { value: "merge-compatible", label: "Merge compatible tracks" },
+            { value: "add-missing-only", label: "Add missing only" },
+            { value: "preserve-timing", label: "Paste timing, keep values" },
+            { value: "preserve-easing", label: "Paste easing, keep timing and values" }
+          ]}
+        />
       </label>
       <label className="scope-field">
         <span>Mapping</span>
-        <select
+        <Select
+          label="Mapping"
           value={pasteMappingMode}
-          onChange={(event) => {
-            setPasteMappingMode(event.currentTarget.value as "one-to-many" | "scope-order");
-          }}
-        >
-          <option value="one-to-many">One source to all destinations</option>
-          <option value="scope-order">Source order to Scope order</option>
-        </select>
+          onChange={setPasteMappingMode}
+          options={[
+            { value: "one-to-many", label: "One source to all destinations" },
+            { value: "scope-order", label: "Source order to Scope order" }
+          ]}
+        />
       </label>
       <div className="edit-scale-fields">
         <label className="scope-field">
@@ -1037,27 +1037,37 @@ const StaggerFields = ({
       <div className="edit-field-grid">
         <label className="scope-field">
           <span>Target order</span>
-          <select value={orderMode} onChange={(event) => { setOrderMode(event.currentTarget.value as ScopeOrderMode); }}>
-            <option value="layer-panel">Layer-panel order</option>
-            <option value="reverse-layer-panel">Reverse layer-panel</option>
-            <option value="top-to-bottom">Top to bottom</option>
-            <option value="bottom-to-top">Bottom to top</option>
-            <option value="left-to-right">Left to right</option>
-            <option value="right-to-left">Right to left</option>
-            <option value="center-outward">Center outward</option>
-            <option value="edges-inward">Edges inward</option>
-            <option value="custom">Custom Scope order</option>
-          </select>
+          <Select
+            label="Target order"
+            onChange={setOrderMode}
+            options={[
+              { value: "layer-panel", label: "Layer-panel order" },
+              { value: "reverse-layer-panel", label: "Reverse layer-panel" },
+              { value: "top-to-bottom", label: "Top to bottom" },
+              { value: "bottom-to-top", label: "Bottom to top" },
+              { value: "left-to-right", label: "Left to right" },
+              { value: "right-to-left", label: "Right to left" },
+              { value: "center-outward", label: "Center outward" },
+              { value: "edges-inward", label: "Edges inward" },
+              { value: "custom", label: "Custom Scope order" }
+            ]}
+            value={orderMode}
+          />
         </label>
         <label className="scope-field">
           <span>Timing mode</span>
-          <select value={timingMode} onChange={(event) => { setTimingMode(event.currentTarget.value as StaggerTimingMode); }}>
-            <option value="fixed-interval">Fixed interval</option>
-            <option value="total-duration">Total duration</option>
-            <option value="fixed-overlap">Fixed overlap</option>
-            <option value="sequential-after-end">Sequential after end</option>
-            <option value="start-before-previous-end">Start before previous end</option>
-          </select>
+          <Select
+            label="Timing mode"
+            onChange={setTimingMode}
+            options={[
+              { value: "fixed-interval", label: "Fixed interval" },
+              { value: "total-duration", label: "Total duration" },
+              { value: "fixed-overlap", label: "Fixed overlap" },
+              { value: "sequential-after-end", label: "Sequential after end" },
+              { value: "start-before-previous-end", label: "Start before previous end" }
+            ]}
+            value={timingMode}
+          />
         </label>
         <label className="scope-field">
           <span>{timingMode === "total-duration" ? "Total duration" : timingMode === "sequential-after-end" ? "Gap" : timingMode === "fixed-interval" ? "Interval" : "Overlap"} (ms)</span>
@@ -1065,28 +1075,43 @@ const StaggerFields = ({
         </label>
         <label className="scope-field">
           <span>Duration policy</span>
-          <select value={durationPolicy} onChange={(event) => { setDurationPolicy(event.currentTarget.value as StaggerDurationPolicy); }}>
-            <option value="preserve">Preserve each duration</option>
-            <option value="scale-to-fit">Scale to fit</option>
-          </select>
+          <Select
+            label="Duration policy"
+            onChange={setDurationPolicy}
+            options={[
+              { value: "preserve", label: "Preserve each duration" },
+              { value: "scale-to-fit", label: "Scale to fit" }
+            ]}
+            value={durationPolicy}
+          />
         </label>
         <label className="scope-field">
           <span>Anchor</span>
-          <select value={anchor} onChange={(event) => { setAnchor(event.currentTarget.value as StaggerAnchor); }}>
-            <option value="preserve-first-start">Preserve first start</option>
-            <option value="preserve-last-end">Preserve last end</option>
-            <option value="extend-timeline">Extend timeline</option>
-          </select>
+          <Select
+            label="Anchor"
+            onChange={setAnchor}
+            options={[
+              { value: "preserve-first-start", label: "Preserve first start" },
+              { value: "preserve-last-end", label: "Preserve last end" },
+              { value: "extend-timeline", label: "Extend timeline" }
+            ]}
+            value={anchor}
+          />
         </label>
         <label className="scope-field">
           <span>Paste mode</span>
-          <select value={pasteMode} onChange={(event) => { setPasteMode(event.currentTarget.value as PasteMode); }}>
-            <option value="replace">Replace existing animation</option>
-            <option value="merge-compatible">Merge compatible tracks</option>
-            <option value="add-missing-only">Add missing only</option>
-            <option value="preserve-timing">Paste timing, keep values</option>
-            <option value="preserve-easing">Paste easing, keep timing and values</option>
-          </select>
+          <Select
+            label="Paste mode"
+            onChange={setPasteMode}
+            options={[
+              { value: "replace", label: "Replace existing animation" },
+              { value: "merge-compatible", label: "Merge compatible tracks" },
+              { value: "add-missing-only", label: "Add missing only" },
+              { value: "preserve-timing", label: "Paste timing, keep values" },
+              { value: "preserve-easing", label: "Paste easing, keep timing and values" }
+            ]}
+            value={pasteMode}
+          />
         </label>
       </div>
       <div className="edit-clipboard-summary" aria-label="Resolved target order">

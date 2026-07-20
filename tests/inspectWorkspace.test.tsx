@@ -1,6 +1,7 @@
 import React from "react";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { readFileSync } from "node:fs";
 import { afterEach, beforeAll, describe, expect, test, vi } from "vitest";
 import type { ScopeScanResult } from "../src/domain/scopeScan";
 import { normalizeMotionSnapshot, type MotionSceneNode } from "../src/plugin/motion";
@@ -120,17 +121,17 @@ const click = (element: Element | null) => {
   });
 };
 
-const change = (element: HTMLInputElement | HTMLSelectElement | null, value: string) => {
-  expect(element).toBeTruthy();
-  act(() => {
-    Object.getOwnPropertyDescriptor(Object.getPrototypeOf(element), "value")?.set?.call(element, value);
-    element?.dispatchEvent(new Event("input", { bubbles: true }));
-    element?.dispatchEvent(new Event("change", { bubbles: true }));
-  });
+const chooseComboboxOption = (name: string, optionName: string) => {
+  click(document.querySelector(`[role="combobox"][aria-label="${name}"]`));
+  click(
+    Array.from(document.querySelectorAll('[role="option"]')).find((option) => option.textContent === optionName) ??
+      null
+  );
 };
 
 describe("Inspect workspace", () => {
   test("renders scoped normalized Motion data, filters locally, toggles debug, and reveals nodes", () => {
+    window.localStorage.setItem("motionops.developerMode", "true");
     const { container, postMessage } = renderApp();
     const scopeRequest = postMessage.mock.calls.find(
       ([payload]) =>
@@ -141,6 +142,7 @@ describe("Inspect workspace", () => {
     )?.[0] as { pluginMessage: { requestId: string } };
 
     postPluginMessage({ type: "SCOPE_SCAN_RESULT", requestId: scopeRequest.pluginMessage.requestId, result: scopeResult });
+    click(Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Confirm scope") ?? null);
     click(container.querySelector('[role="tab"][aria-label="Inspect workspace"]'));
 
     const inspectRequest = [...postMessage.mock.calls].reverse().find(
@@ -173,19 +175,50 @@ describe("Inspect workspace", () => {
 
     expect(container.textContent).toContain("Manual Layer");
     expect(container.textContent).toContain("Mixed Layer");
-    expect(container.textContent).toContain("Manual Tracks");
-    expect(container.textContent).toContain("OPACITY");
+    expect(container.textContent).toContain("Manual tracks");
+    expect(container.textContent).toContain("Opacity track");
+    expect(container.textContent).toContain("Manual · 500 ms");
+    expect(container.textContent).not.toContain("Opacity track - Partially editable");
     expect(container.textContent).toContain("500 ms");
+    expect(container.textContent).toContain("0%");
+    expect(container.textContent).toContain("100%");
+    expect(container.textContent).toContain("Track duration");
+    expect(container.textContent).toContain("Rectangle · Manual");
+    expect(container.textContent).not.toContain("Node type");
+    expect(container.textContent).not.toContain("{ type: FLOAT");
+    expect(container.textContent).not.toContain("Main timing");
+    expect(container.textContent).not.toContain("Animation styles and derived data");
+    expect(container.textContent).not.toContain("No animation styles");
 
-    const sourceSelect = Array.from(container.querySelectorAll("select")).find((select) =>
-      Array.from(select.options).some((option) => option.value === "mixed")
-    );
-    change(sourceSelect ?? null, "mixed");
+    chooseComboboxOption("Source", "Mixed");
     expect(container.textContent).not.toContain("Manual Layer");
     expect(container.textContent).toContain("Mixed Layer");
+    expect(container.textContent).toContain("Frame · Mixed");
 
-    click(container.querySelector('input[value="debug"]'));
+    const limitationBanner = container.querySelector(".inspector-limitation-banner");
+    expect(limitationBanner).toBeTruthy();
+    expect(limitationBanner?.querySelector("h4")?.textContent).toBe("Some opacity details are read-only");
+    expect(limitationBanner?.querySelectorAll("p")[0]?.textContent).toBe(
+      "MotionOps can inspect the manual opacity track, but some derived Figma animation data cannot be edited safely."
+    );
+    expect(limitationBanner?.querySelectorAll("p")[1]?.textContent).toBe(
+      "The manual track remains editable. Derived animation details are read-only and will not be modified by Edit or Sequence."
+    );
+    expect(limitationBanner?.querySelector("ul")).toBeNull();
+    expect(Array.from(container.querySelectorAll(".inspector-section h4")).map((heading) => heading.textContent)).not.toContain(
+      "Derived animation"
+    );
+    expect(container.textContent).not.toContain("Timeline duration: 500 ms");
+
+    click(Array.from(container.querySelectorAll("label")).find((label) => label.textContent === "Warnings only")?.querySelector("input") ?? null);
+    expect(container.textContent).toContain("No inspected targets match the current filters.");
+    click(Array.from(container.querySelectorAll("label")).find((label) => label.textContent === "Warnings only")?.querySelector("input") ?? null);
+
+    click(Array.from(container.querySelectorAll('[role="radio"]')).find((button) => button.textContent === "Debug") ?? null);
+    expect(container.textContent).toContain("Derived animation");
+    expect(container.textContent).toContain("Timeline duration: 500 ms");
     expect(container.textContent).toContain("Serialized normalized data");
+    expect(container.textContent).toContain("{");
 
     click(container.querySelector('button[aria-label="Reveal Mixed Layer in Figma"]'));
     const revealRequest = [...postMessage.mock.calls].reverse().find(
@@ -196,5 +229,15 @@ describe("Inspect workspace", () => {
         (payload as { pluginMessage?: { type?: string } }).pluginMessage?.type === "SCOPE_REVEAL_NODE_REQUEST"
     )?.[0] as { pluginMessage: { nodeId: string } };
     expect(revealRequest.pluginMessage.nodeId).toBe("mixed");
+  });
+
+  test("uses fixed Inspect controls above independently scrolling target and detail panels", () => {
+    const styles = readFileSync("src/ui/styles.css", "utf8");
+    expect(styles).toMatch(/\.workspace-panel:has\(\.inspect-workspace\)\s*{[^}]*place-content:\s*stretch;/s);
+    expect(styles).toMatch(/\.inspect-workspace\s*{[^}]*grid-template-rows:\s*auto auto minmax\(0,\s*1fr\);[^}]*overflow:\s*hidden;/s);
+    expect(styles).toMatch(/\.inspect-filter-controls\s*{[^}]*background:\s*var\(--color-surface\);/s);
+    expect(styles).toMatch(/\.inspect-filter-controls\s*{[^}]*position:\s*relative;[^}]*z-index:\s*20;/s);
+    expect(styles).toMatch(/\.inspect-layout\s*{[^}]*overflow:\s*hidden;/s);
+    expect(styles).toMatch(/\.inspector-target-list,\s*\.inspector-detail\s*{[^}]*overflow:\s*auto;/s);
   });
 });

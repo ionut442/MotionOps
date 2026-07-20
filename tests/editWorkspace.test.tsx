@@ -115,6 +115,14 @@ const change = (element: HTMLInputElement | HTMLSelectElement | null, value: str
   });
 };
 
+const chooseComboboxOption = (name: string, optionName: string) => {
+  click(document.querySelector(`[role="combobox"][aria-label="${name}"]`));
+  click(
+    Array.from(document.querySelectorAll('[role="option"]')).find((option) => option.textContent === optionName) ??
+      null
+  );
+};
+
 const latestPluginMessage = <T extends { type: string }>(postMessage: ReturnType<typeof vi.spyOn>, type: T["type"]): T => {
   const payload = [...postMessage.mock.calls].reverse().find(
     ([item]) =>
@@ -137,6 +145,7 @@ describe("Edit workspace", () => {
 
     const scopeRequest = latestPluginMessage<{ type: "SCOPE_SCAN_REQUEST"; requestId: string }>(postMessage, "SCOPE_SCAN_REQUEST");
     postPluginMessage({ type: "SCOPE_SCAN_RESULT", requestId: scopeRequest.requestId, result: scopeResult });
+    click(Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Confirm scope") ?? null);
     click(container.querySelector('[role="tab"][aria-label="Edit workspace"]'));
 
     const inspectRequest = latestPluginMessage<{ type: "MOTION_INSPECT_REQUEST"; requestId: string; nodeIds: readonly string[] }>(
@@ -213,7 +222,7 @@ describe("Edit workspace", () => {
     expect(container.textContent).toContain("Stale or unverifiable plan was blocked before write.");
 
     click(Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Easing") ?? null);
-    change(container.querySelectorAll("select")[1], "custom");
+    chooseComboboxOption("Easing", "Custom cubic-bezier");
     const inputs = container.querySelectorAll("input");
     change(inputs[inputs.length - 1], "cubic-bezier(2, 0, 0.4, 1)");
     click(Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Build plan") ?? null);
@@ -225,6 +234,7 @@ describe("Edit workspace", () => {
     postPluginMessage({ type: "PLUGIN_READY", pluginVersion: "0.0.0", figmaMode: "default", apiLabEnabled: false });
     const scopeRequest = latestPluginMessage<{ type: "SCOPE_SCAN_REQUEST"; requestId: string }>(postMessage, "SCOPE_SCAN_REQUEST");
     postPluginMessage({ type: "SCOPE_SCAN_RESULT", requestId: scopeRequest.requestId, result: scopeResult });
+    click(Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Confirm scope") ?? null);
     click(container.querySelector('[role="tab"][aria-label="Edit workspace"]'));
     const inspectRequest = latestPluginMessage<{ type: "MOTION_INSPECT_REQUEST"; requestId: string; nodeIds: readonly string[] }>(
       postMessage,

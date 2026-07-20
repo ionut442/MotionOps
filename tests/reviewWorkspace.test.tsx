@@ -84,6 +84,7 @@ describe("Review workspace", () => {
     postPluginMessage({ type: "PLUGIN_READY", pluginVersion: "0.0.0", figmaMode: "default", apiLabEnabled: false });
     const scopeRequest = latestPluginMessage<{ type: "SCOPE_SCAN_REQUEST"; requestId: string }>(postMessage, "SCOPE_SCAN_REQUEST");
     postPluginMessage({ type: "SCOPE_SCAN_RESULT", requestId: scopeRequest.requestId, result: scopeResult });
+    click(Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Confirm scope") ?? null);
 
     click(container.querySelector('[role="tab"][aria-label="Review workspace"]'));
     const storageRequest = latestPluginMessage<{ type: "STANDARDS_STORAGE_REQUEST"; requestId: string }>(postMessage, "STANDARDS_STORAGE_REQUEST");

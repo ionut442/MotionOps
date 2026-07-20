@@ -70,7 +70,7 @@ test("MotionOps production shell renders deterministic workspace navigation", as
   await expect(page.getByRole("navigation", { name: "Workspace navigation region" })).toBeVisible();
   await expect(page.getByRole("main", { name: "MotionOps workspace" })).toBeVisible();
   await expect(page.locator(".context-drawer-shell")).toHaveCount(0);
-  await expect(page.getByRole("contentinfo", { name: "MotionOps footer" })).toBeVisible();
+  await expect(page.getByRole("contentinfo", { name: "MotionOps footer" })).toHaveCount(0);
   await expect(page.getByTestId("resize-handle")).toHaveAccessibleName("Resize plugin window");
   await expect(page.getByRole("tablist", { name: "Workspace navigation" })).toBeVisible();
   await expect(page.getByRole("tab")).toHaveCount(5);
@@ -81,12 +81,12 @@ test("MotionOps production shell renders deterministic workspace navigation", as
   await expect(page.getByRole("tab", { name: "Review workspace" })).toBeVisible();
   await expectOnlyActiveWorkspace(page, "Scope");
   await expect(page.getByRole("heading", { level: 2, name: "Inspect" })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Rescan" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Refresh" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Cancel scan" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Reset custom order" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Confirm scope" })).toBeVisible();
   await expect(page.getByRole("button", { name: /Apply|Motion|Timeline/i })).toHaveCount(0);
   await expect(page.getByRole("combobox", { name: "Target order" })).toBeVisible();
-  await expect(page.getByText("Selection sync")).toBeVisible();
+  await expect(page.getByText("Selection sync")).toHaveCount(0);
   await expect(page.getByText(/keyframe|easing|track|animation style|handoff/i)).toHaveCount(0);
   for (const blockedText of [
     "Context region",
@@ -113,7 +113,7 @@ test("MotionOps production shell renders deterministic workspace navigation", as
 
 test("MotionOps shell handles plugin messages outside Figma without crashing", async ({ page }) => {
   await page.goto("/");
-  await expect(page.getByTestId("connection-state")).toHaveText("Waiting for plugin");
+  await expect(page.getByTestId("document-status")).toContainText("Initializing");
 
   await page.evaluate(() => {
     window.postMessage({
@@ -126,8 +126,9 @@ test("MotionOps shell handles plugin messages outside Figma without crashing", a
     });
   });
 
-  await expect(page.getByTestId("connection-state")).toHaveText("Connected");
-  await expect(page.getByTestId("last-message")).toHaveText("PLUGIN_READY");
+  await expect(page.getByTestId("document-status")).toContainText("Synced");
+  await expect(page.getByTestId("connection-state")).toHaveCount(0);
+  await expect(page.getByTestId("last-message")).toHaveCount(0);
 });
 
 test("MotionOps shell emits typed resize requests while dragging", async ({ page }) => {
@@ -166,7 +167,7 @@ test("MotionOps shell emits typed resize requests while dragging", async ({ page
     type: "RESIZE_PLUGIN_WINDOW",
     payload: { width: 760, height: 560 }
   });
-  await expect(page.getByTestId("last-request")).toContainText("req-");
+  await expect(page.getByTestId("last-request")).toHaveCount(0);
 });
 
 test("workspace navigation switches by click without plugin or network work", async ({ page }) => {
@@ -207,7 +208,43 @@ test("workspace navigation switches by click without plugin or network work", as
   expect(await page.evaluate(() => window.__motionOpsNetworkCalls ?? [])).toEqual([]);
 });
 
-test("workspace navigation follows vertical tab keyboard policy", async ({ page }) => {
+test("Inspect workspace renders when plugin storage access is blocked", async ({ page }) => {
+  await page.addInitScript(() => {
+    const blockedStorage = {
+      getItem() {
+        throw new DOMException("Storage is blocked", "SecurityError");
+      },
+      setItem() {
+        throw new DOMException("Storage is blocked", "SecurityError");
+      },
+      removeItem() {
+        throw new DOMException("Storage is blocked", "SecurityError");
+      },
+      clear() {
+        throw new DOMException("Storage is blocked", "SecurityError");
+      },
+      key() {
+        return null;
+      },
+      get length() {
+        return 0;
+      }
+    };
+    Object.defineProperty(window, "localStorage", {
+      configurable: true,
+      value: blockedStorage
+    });
+  });
+
+  await page.goto("/");
+  await page.getByRole("tab", { name: "Inspect workspace" }).click();
+
+  await expect(page.getByRole("heading", { level: 2, name: "Inspect" })).toBeVisible();
+  await expect(page.getByText("Define or confirm a Scope before opening Inspect.")).toBeVisible();
+  await expect(page.getByRole("radio", { name: "Debug" })).toHaveCount(0);
+});
+
+test("workspace navigation follows horizontal tab keyboard policy", async ({ page }) => {
   await page.setViewportSize({ width: 1080, height: 760 });
   await page.goto("/");
 
@@ -217,19 +254,19 @@ test("workspace navigation follows vertical tab keyboard policy", async ({ page 
   await page.keyboard.press("Tab");
   await expect(page.getByRole("tab", { name: "Scope workspace" })).toBeFocused();
 
-  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("ArrowRight");
   await expect(page.getByRole("tab", { name: "Inspect workspace" })).toBeFocused();
   await expectOnlyActiveWorkspace(page, "Inspect");
 
-  await page.keyboard.press("ArrowUp");
+  await page.keyboard.press("ArrowLeft");
   await expect(page.getByRole("tab", { name: "Scope workspace" })).toBeFocused();
   await expectOnlyActiveWorkspace(page, "Scope");
 
-  await page.keyboard.press("ArrowUp");
+  await page.keyboard.press("ArrowLeft");
   await expect(page.getByRole("tab", { name: "Review workspace" })).toBeFocused();
   await expectOnlyActiveWorkspace(page, "Review");
 
-  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("ArrowRight");
   await expect(page.getByRole("tab", { name: "Scope workspace" })).toBeFocused();
   await expectOnlyActiveWorkspace(page, "Scope");
 
@@ -265,15 +302,15 @@ test("workspace active and focus states are visible without color alone", async 
     }
     const label = window.getComputedStyle(labelElement);
     return {
-      borderLeftWidth: computed.borderLeftWidth,
+      backgroundColor: computed.backgroundColor,
       outlineStyle: computed.outlineStyle,
       textDecorationLine: label.textDecorationLine
     };
   });
 
-  expect(styles.borderLeftWidth).toBe("4px");
+  expect(styles.backgroundColor).not.toBe("rgba(0, 0, 0, 0)");
   expect(styles.outlineStyle).not.toBe("none");
-  expect(styles.textDecorationLine).toContain("underline");
+  expect(styles.textDecorationLine).toBe("none");
 });
 
 test("MotionOps shell stays usable at supported dimensions", async ({ page }) => {
