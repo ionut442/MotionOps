@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-unnecessary-condition */
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import {
   buildInspectorTargets,
   capabilityLabel,
@@ -233,6 +233,10 @@ const TruncatedText = ({
 }) => {
   const ref = useRef<HTMLSpanElement | null>(null);
   const [truncated, setTruncated] = useState(false);
+  const isTruncated = useCallback(() => {
+    const element = ref.current;
+    return element !== null && element.scrollWidth > element.clientWidth + 1;
+  }, []);
 
   useLayoutEffect(() => {
     const element = ref.current;
@@ -240,28 +244,35 @@ const TruncatedText = ({
       return;
     }
     const update = () => {
-      setTruncated(element.scrollWidth > element.clientWidth + 1);
+      setTruncated(isTruncated());
     };
     update();
     const frame = window.requestAnimationFrame(update);
+    const secondFrame = window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(update);
+    });
     const timer = window.setTimeout(update, 0);
     const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(update);
     observer?.observe(element);
+    if (element.parentElement !== null) {
+      observer?.observe(element.parentElement);
+    }
     window.addEventListener("resize", update);
     return () => {
       window.cancelAnimationFrame(frame);
+      window.cancelAnimationFrame(secondFrame);
       window.clearTimeout(timer);
       observer?.disconnect();
       window.removeEventListener("resize", update);
     };
-  }, [children]);
+  }, [children, isTruncated]);
 
   const text = (
-    <span aria-label={children} className={className} ref={ref}>
+    <span aria-label={children} className={className} ref={ref} tabIndex={truncated ? 0 : undefined}>
       {children}
     </span>
   );
-  return truncated || children.length > 48 ? <Tooltip content={tooltip ?? children}>{text}</Tooltip> : text;
+  return <Tooltip content={tooltip ?? children} shouldOpen={isTruncated}>{text}</Tooltip>;
 };
 
 export const InspectWorkspace = ({
@@ -700,7 +711,7 @@ const MetricCard = ({
     <Tooltip content={tooltip}>
       <Icon name={icon} size={14} />
     </Tooltip>
-    <div>
+    <div className="inspector-metric-copy">
       <dt>{label}</dt>
       <dd>{value}</dd>
       {detail ? <span>{detail}</span> : null}
@@ -715,21 +726,21 @@ const MetricStrip = ({ groups }: { readonly groups: ReturnType<typeof groupInspe
   return (
     <dl className="inspector-summary-grid">
       <MetricCard
-        icon="sparkles"
+        icon="sliders"
         label="Animated properties"
         tone="purple"
         tooltip="Properties with exposed manual tracks or derived Figma Motion details."
         value={String(animatedPropertyCount(groups))}
       />
       <MetricCard
-        icon="manual-motion"
+        icon="tracks"
         label="Tracks"
         tone="blue"
         tooltip="Manual Motion tracks that MotionOps can inspect on this layer."
         value={String(tracks)}
       />
       <MetricCard
-        icon="layers"
+        icon="keyframe"
         label="Keyframes"
         tone="green"
         tooltip="Exposed manual keyframes across the selected layer."

@@ -1863,11 +1863,20 @@ textarea {
 }
 
 .inspect-workspace .inspector-target-row {
-  border-radius: 0;
+  --inspector-target-row-bg: var(--mo-surface);
+  background: var(--inspector-target-row-bg);
+  border: 1px solid transparent;
+  border-radius: 5px;
   display: flex !important;
   min-height: 30px;
   overflow: hidden;
   padding: 3px 6px 3px calc(7px + var(--scope-depth, 0) * 11px);
+  position: relative;
+}
+
+.inspect-workspace .inspector-target-row:hover {
+  --inspector-target-row-bg: #f5f5f6;
+  background: var(--inspector-target-row-bg);
 }
 
 .inspect-workspace .inspector-target-row > *,
@@ -1877,15 +1886,31 @@ textarea {
 }
 
 .inspect-workspace .inspector-target-row[data-selected="true"] {
-  box-shadow: inset 3px 0 0 var(--mo-accent);
+  --inspector-target-row-bg: #ededf0;
+  background: var(--inspector-target-row-bg);
+  box-shadow: none;
+}
+
+.inspect-workspace .inspector-target-row[data-selected="true"]:hover {
+  --inspector-target-row-bg: #e9e9ec;
+  background: var(--inspector-target-row-bg);
+}
+
+.inspect-workspace .inspector-target-row:focus-visible {
+  outline: 2px solid rgba(88, 100, 242, .28);
+  outline-offset: 1px;
 }
 
 .inspector-target-name {
+  display: block;
   flex: 1 1 0;
   font-size: 11px;
-  font-weight: 520;
+  font-weight: 400;
   line-height: 16px;
   max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   width: 100%;
 }
 
@@ -1898,9 +1923,14 @@ textarea {
 }
 
 .inspector-target-main {
-  flex: 1 1 0;
+  flex: 1 1 0%;
+  max-width: calc(100% - 50px);
   overflow: hidden;
-  width: 100%;
+  width: auto;
+}
+
+.inspector-target-main .ui-tooltip-anchor {
+  overflow: hidden;
 }
 
 .inspector-target-main > .ui-tooltip-anchor:first-child {
@@ -1920,12 +1950,29 @@ textarea {
 }
 
 .inspector-target-indicators {
+  --inspector-action-solid-width: 44px;
+  --inspector-action-fade-width: 16px;
   flex: 0 0 44px;
   justify-content: flex-end;
   max-width: 44px;
-  overflow: hidden;
-  transform: translateX(-16px);
+  overflow: visible;
+  position: relative;
   width: 44px;
+  z-index: 1;
+}
+
+.inspector-target-indicators::before {
+  background:
+    linear-gradient(90deg, rgba(255, 255, 255, 0), var(--inspector-target-row-bg) 72%),
+    linear-gradient(90deg, var(--inspector-target-row-bg), var(--inspector-target-row-bg));
+  bottom: 0;
+  content: "";
+  left: calc(-1 * var(--inspector-action-fade-width));
+  pointer-events: none;
+  position: absolute;
+  top: 0;
+  width: calc(var(--inspector-action-solid-width) + var(--inspector-action-fade-width));
+  z-index: -1;
 }
 
 .inspector-target-indicators > .ui-tooltip-anchor {
@@ -1989,41 +2036,83 @@ textarea {
 }
 
 .inspector-summary-grid {
-  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 .inspector-metric-card {
   align-items: start;
+  border-radius: 7px;
   display: grid;
-  gap: 7px;
-  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 6px;
+  grid-template-columns: 16px minmax(0, 1fr);
+  min-height: 58px;
   min-width: 0;
+  padding: 7px;
+}
+
+.inspector-metric-card .ui-tooltip-anchor {
+  align-items: center;
+  color: var(--inspector-metric-ink);
+  display: inline-flex;
+  height: 16px;
+  justify-content: center;
+  width: 16px;
+}
+
+.inspector-metric-copy {
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  min-width: 0;
+  padding: 0 !important;
 }
 
 .inspector-metric-card[data-tone="purple"] {
+  --inspector-metric-ink: #6741a5;
   background: #f6f0ff;
   border-color: #dfd1ff;
 }
 
 .inspector-metric-card[data-tone="blue"] {
+  --inspector-metric-ink: #2767c5;
   background: #eef5ff;
   border-color: #cddfff;
 }
 
 .inspector-metric-card[data-tone="green"] {
+  --inspector-metric-ink: #1f7a51;
   background: #eff8f4;
   border-color: #cbe9dc;
 }
 
 .inspector-metric-card[data-tone="yellow"] {
+  --inspector-metric-ink: #93640f;
   background: #fff8e8;
   border-color: #f0dfaa;
+}
+
+.inspector-metric-card dt {
+  color: var(--inspector-metric-ink);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.inspector-metric-card dd {
+  color: var(--mo-ink);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 650;
+  line-height: 1.25;
+  margin-top: 2px;
 }
 
 .inspector-metric-card span {
   color: var(--mo-ink-tertiary);
   display: block;
-  font-size: 9.5px;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.25;
   margin-top: 1px;
 }
 

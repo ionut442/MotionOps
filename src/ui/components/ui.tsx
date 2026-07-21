@@ -610,13 +610,15 @@ export const Tooltip = ({
   content,
   placement = "top",
   delayMs = 350,
-  disabled = false
+  disabled = false,
+  shouldOpen
 }: {
   readonly children: ReactNode;
   readonly content: ReactNode;
   readonly placement?: TooltipPlacement;
   readonly delayMs?: number;
   readonly disabled?: boolean;
+  readonly shouldOpen?: () => boolean;
 }) => {
   const id = useId();
   const anchorRef = useRef<HTMLSpanElement | null>(null);
@@ -638,7 +640,7 @@ export const Tooltip = ({
   }, [clearTimer]);
 
   const scheduleOpen = () => {
-    if (disabled) {
+    if (disabled || shouldOpen?.() === false) {
       return;
     }
     clearTimer();
@@ -664,10 +666,15 @@ export const Tooltip = ({
         close();
       }
     };
+    const handleScroll = () => {
+      close();
+    };
 
     window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("scroll", handleScroll, true);
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("scroll", handleScroll, true);
     };
   }, [close, open]);
 
@@ -725,10 +732,8 @@ export const Tooltip = ({
 
     updatePosition();
     window.addEventListener("resize", updatePosition);
-    window.addEventListener("scroll", updatePosition, true);
     return () => {
       window.removeEventListener("resize", updatePosition);
-      window.removeEventListener("scroll", updatePosition, true);
     };
   }, [open, placement]);
 

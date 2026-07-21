@@ -162,6 +162,20 @@ const loadInspectFixture = async (page: Page) => {
               childrenIncluded: false,
               rootIds: ["deep"],
               traversalIndex: 2
+            },
+            {
+              id: "short",
+              parentId: "deep",
+              name: "Short Name",
+              type: "RECTANGLE",
+              depth: 1,
+              childIds: [],
+              visible: true,
+              locked: true,
+              hasChildren: false,
+              childrenIncluded: false,
+              rootIds: ["deep"],
+              traversalIndex: 3
             }
           ],
           issues: []
@@ -179,14 +193,14 @@ const loadInspectFixture = async (page: Page) => {
           type: "MOTION_INSPECT_RESULT",
           requestId,
           result: {
-            requestedNodeIds: ["deep", "long", "mixed"],
+            requestedNodeIds: ["deep", "long", "mixed", "short"],
             snapshots,
             failures: []
           }
         }
       });
     },
-    { requestId: inspectRequestId, snapshots: [snapshot("deep"), snapshot("long"), snapshot("mixed", "mixed")] }
+    { requestId: inspectRequestId, snapshots: [snapshot("deep"), snapshot("long"), snapshot("mixed", "mixed"), snapshot("short", "none")] }
   );
   await expect(page.getByLabel("Inspector target list")).toBeVisible();
 };
@@ -230,6 +244,50 @@ test("Inspect panel stays aligned and overflow-free across responsive widths", a
     );
     expect(rowsOk).toBe(true);
 
+    const rowContracts = await page.locator(".inspector-target-row").evaluateAll((rows) =>
+      rows.every((row) => {
+        const name = row.querySelector<HTMLElement>(".inspector-target-name");
+        const indicators = row.querySelector<HTMLElement>(".inspector-target-indicators");
+        if (!name || !indicators) return false;
+        const nameStyle = window.getComputedStyle(name);
+        const indicatorStyle = window.getComputedStyle(indicators);
+        return (
+          Number.parseFloat(nameStyle.fontSize) <= 12 &&
+          Number.parseInt(nameStyle.fontWeight, 10) <= 500 &&
+          nameStyle.textOverflow === "ellipsis" &&
+          indicatorStyle.flexShrink === "0"
+        );
+      })
+    );
+    expect(rowContracts).toBe(true);
+
+    const longNameTruncates = await page.locator(".inspector-target-name").filter({ hasText: "Very Long Checkout" }).evaluate((element) => element.scrollWidth > element.clientWidth);
+    expect(longNameTruncates).toBe(true);
+
+    const selectedStyle = await page.locator(".inspector-target-row[data-selected=\"true\"]").evaluate((row) => {
+      const rect = row.getBoundingClientRect();
+      const style = window.getComputedStyle(row);
+      return {
+        borderRadius: Number.parseFloat(style.borderTopLeftRadius),
+        boxShadow: style.boxShadow,
+        width: rect.width
+      };
+    });
+    expect(selectedStyle.borderRadius).toBeGreaterThanOrEqual(4);
+    expect(selectedStyle.boxShadow).toBe("none");
+    expect(selectedStyle.width).toBeGreaterThan(200);
+
+    const metricContracts = await page.locator(".inspector-metric-card").evaluateAll((cards) =>
+      cards.length === 4 &&
+      cards.every((card) => {
+        const copy = card.querySelector<HTMLElement>(".inspector-metric-copy");
+        if (!copy) return false;
+        const copyStyle = window.getComputedStyle(copy);
+        return copyStyle.backgroundColor === "rgba(0, 0, 0, 0)" && copyStyle.borderTopWidth === "0px";
+      })
+    );
+    expect(metricContracts).toBe(true);
+
     await page.screenshot({ path: testInfo.outputPath(`inspect-${String(viewport.width)}x${String(viewport.height)}.png`), fullPage: true });
   }
 });
@@ -249,6 +307,9 @@ test("Inspect details use custom viewport-contained tooltips", async ({ page }, 
   expect((tooltipBox?.x ?? 0)).toBeGreaterThanOrEqual(0);
   expect((tooltipBox?.x ?? 0) + (tooltipBox?.width ?? 0)).toBeLessThanOrEqual(760);
   expect(Math.abs(((tooltipBox?.y ?? 0) + (tooltipBox?.height ?? 0)) - (anchorBox?.y ?? 0))).toBeLessThan(90);
+
+  await page.getByText("Short Name").hover();
+  await expect(page.getByRole("tooltip")).toHaveCount(0);
 
   await page.keyboard.press("Escape");
   await expect(page.getByRole("tooltip")).toHaveCount(0);
