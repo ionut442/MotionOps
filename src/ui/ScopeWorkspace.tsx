@@ -33,6 +33,7 @@ import type { ScopeScanNode, ScopeScanResult } from "../domain/scopeScan";
 import type { PluginToUiMessage, UiToPluginMessage } from "../shared/messages";
 import { Select } from "./components/ui";
 import { Icon } from "./components/Icon";
+import { FigmaNodeIcon } from "./components/FigmaNodeIcon";
 
 export interface ScopeWorkspaceProps {
   readonly lastMessage: PluginToUiMessage | null;
@@ -590,9 +591,19 @@ export const ScopeWorkspace = ({
             ><Icon name="sequence" size={12} /></button>
           ) : null}
           <span className="scope-node-name">{node.name}</span>
-          <span className="scope-node-type">{nodeTypeLabel(node.type)}</span>
-          {node.visible ? null : <span className="scope-node-indicator">Hidden</span>}
-          {node.locked ? <span className="scope-node-indicator">Locked</span> : null}
+          <FigmaNodeIcon nodeType={node.type} />
+          {node.visible ? null : (
+            <span className="scope-state-icon" title="Hidden layer">
+              <Icon name="hidden" size={13} />
+              <span className="visually-hidden">Hidden layer</span>
+            </span>
+          )}
+          {node.locked ? (
+            <span className="scope-state-icon" title="Locked layer">
+              <Icon name="locked" size={13} />
+              <span className="visually-hidden">Locked layer</span>
+            </span>
+          ) : null}
           <button
             aria-label={`Reveal ${node.name} in Figma`}
             className="scope-row-action"
