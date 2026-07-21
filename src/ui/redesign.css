@@ -1264,6 +1264,30 @@ textarea {
   }
 }
 
+
+/* Override legacy narrow-density selectors with the redesigned compact bar. */
+
+.app-shell[data-density="narrow"] .global-header {
+  align-items: center;
+  display: flex;
+  grid-template-columns: none;
+  grid-template-rows: none;
+}
+
+.app-shell[data-density="narrow"] .global-header-status-slot {
+  grid-column: auto;
+  justify-content: flex-end;
+}
+
+.app-shell[data-density="narrow"] .document-status {
+  width: auto;
+}
+
+.app-shell[data-density="narrow"] .shell-body {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .workspace-tab,
   .shell-main button,
