@@ -99,9 +99,6 @@ const selectPreferredTarget = (
 const formatCount = (count: number, singular: string, plural = `${singular}s`): string =>
   `${String(count)} ${count === 1 ? singular : plural}`;
 
-const targetMetadataLabel = (target: Pick<InspectorTarget, "nodeType" | "sourceKind">): string =>
-  `${nodeTypeLabel(target.nodeType)} · ${sourceKindLabel(target.sourceKind)}`;
-
 const firstTrackDuration = (groups: ReturnType<typeof groupInspectorTarget>): string | null => {
   const timings = groups.manualGroups.flatMap((group) => group.tracks.map(trackTiming));
   if (timings.length === 0) {
