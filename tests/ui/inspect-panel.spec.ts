@@ -254,6 +254,7 @@ test("Inspect panel stays aligned and overflow-free across responsive widths", a
         return (
           Number.parseFloat(nameStyle.fontSize) <= 12 &&
           Number.parseInt(nameStyle.fontWeight, 10) <= 500 &&
+          nameStyle.textAlign === "left" &&
           nameStyle.textOverflow === "ellipsis" &&
           indicatorStyle.flexShrink === "0"
         );
@@ -281,9 +282,17 @@ test("Inspect panel stays aligned and overflow-free across responsive widths", a
       cards.length === 4 &&
       cards.every((card) => {
         const copy = card.querySelector<HTMLElement>(".inspector-metric-copy");
-        if (!copy) return false;
+        const label = card.querySelector<HTMLElement>("dt");
+        const icon = card.querySelector<HTMLElement>(".ui-tooltip-anchor");
+        if (!copy || !label || !icon) return false;
         const copyStyle = window.getComputedStyle(copy);
-        return copyStyle.backgroundColor === "rgba(0, 0, 0, 0)" && copyStyle.borderTopWidth === "0px";
+        const labelRect = label.getBoundingClientRect();
+        const iconRect = icon.getBoundingClientRect();
+        return (
+          copyStyle.backgroundColor === "rgba(0, 0, 0, 0)" &&
+          copyStyle.borderTopWidth === "0px" &&
+          Math.abs(iconRect.top - labelRect.top) <= 2
+        );
       })
     );
     expect(metricContracts).toBe(true);
