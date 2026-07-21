@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-unnecessary-condition */
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import {
   buildInspectorTargets,
   capabilityLabel,
@@ -24,8 +24,8 @@ import {
 import type { ScopeScanResult } from "../domain/scopeScan";
 import type { CapabilityStatus, MotionSourceKind } from "../domain/motion";
 import type { PluginToUiMessage, UiToPluginMessage } from "../shared/messages";
-import { Badge, EmptyState, SegmentedControl, Select, type SelectOption } from "./components/ui";
-import { Icon } from "./components/Icon";
+import { Badge, EmptyState, SegmentedControl, Select, Tooltip, type SelectOption } from "./components/ui";
+import { Icon, type IconName } from "./components/Icon";
 import { FigmaNodeIcon, MotionSourceIcon } from "./components/FigmaNodeIcon";
 
 export interface InspectWorkspaceProps {
@@ -99,44 +99,28 @@ const selectPreferredTarget = (
 const formatCount = (count: number, singular: string, plural = `${singular}s`): string =>
   `${String(count)} ${count === 1 ? singular : plural}`;
 
-const firstTrackDuration = (groups: ReturnType<typeof groupInspectorTarget>): string | null => {
+const longestTrackDurationMs = (groups: ReturnType<typeof groupInspectorTarget>): number | null => {
   const timings = groups.manualGroups.flatMap((group) => group.tracks.map(trackTiming));
   if (timings.length === 0) {
     return null;
   }
-  const maxDuration = Math.max(...timings.map((timing) => timing.durationMs));
-  return formatMilliseconds(maxDuration);
+  return Math.max(...timings.map((timing) => timing.durationMs));
 };
 
-const targetSummary = (target: InspectorTarget, groups: ReturnType<typeof groupInspectorTarget> | null) => {
-  if (groups === null) {
-    return [
-      ["Source", sourceKindLabel(target.sourceKind)]
-    ] satisfies readonly (readonly [string, string])[];
-  }
-
-  const keyframes = groups.manualGroups.reduce(
+const totalKeyframes = (groups: ReturnType<typeof groupInspectorTarget>): number =>
+  groups.manualGroups.reduce(
     (count, group) => count + group.tracks.reduce((trackCount, track) => trackCount + track.keyframes.length, 0),
     0
   );
-  const trackDuration = firstTrackDuration(groups);
-  const items: (readonly [string, string])[] = [
-    ["Source", sourceKindLabel(target.sourceKind)],
-    ["Animated properties", String(new Set([
+
+const animatedPropertyCount = (groups: ReturnType<typeof groupInspectorTarget>): number =>
+  new Set([
       ...groups.manualGroups.map((group) => group.property),
       ...groups.derivedAnimations.map((animation) => animation.property)
-    ]).size)],
-    ["Keyframes", String(keyframes)]
-  ];
-  if (trackDuration !== null) {
-    items.push(["Track duration", trackDuration]);
-  }
-  if (groups.timelines.length > 0) {
-    const timelineDuration = formatMilliseconds(groups.timelines[0].durationMs);
-    items.push(["Timeline duration", timelineDuration]);
-  }
-  return items;
-};
+    ]).size;
+
+const timelineDurationMs = (groups: ReturnType<typeof groupInspectorTarget>): number | null =>
+  groups.timelines.length === 0 ? null : Math.max(...groups.timelines.map((timeline) => timeline.durationMs));
 
 const hasUsefulDerivedDetails = (groups: ReturnType<typeof groupInspectorTarget>, mode: InspectorMode): boolean => {
   if (groups.derivedAnimations.length === 0) {
@@ -152,22 +136,133 @@ const hasUsefulDerivedDetails = (groups: ReturnType<typeof groupInspectorTarget>
 const hasUsefulTimelineDetails = (groups: ReturnType<typeof groupInspectorTarget>, mode: InspectorMode): boolean =>
   mode === "debug" || groups.timelines.length > 1;
 
-const primaryBadgeForTarget = (target: InspectorTarget): { readonly label: string; readonly tone: "warning" | "neutral" } | null => {
+const capabilityStatusForTarget = (target: InspectorTarget): { readonly label: string; readonly tone: "warning" | "neutral" | "critical" | "success" } => {
+  if (target.readError) {
+    return { label: "Motion read failed", tone: "critical" };
+  }
   if (target.warnings.length > 0) {
     return { label: `${String(target.warnings.length)} warning${target.warnings.length === 1 ? "" : "s"}`, tone: "warning" };
   }
   if (target.limitations.length > 0) {
-    return { label: target.limitations.length === 1 ? "Partially editable" : `${String(target.limitations.length)} limitations`, tone: "neutral" };
+    return { label: "Partially editable", tone: "warning" };
   }
-  return null;
+  if (target.sourceKind === "none") {
+    return { label: "No Motion", tone: "neutral" };
+  }
+  if (target.sourceKind === "style") {
+    return { label: "Read-only Motion", tone: "neutral" };
+  }
+  return { label: "Fully editable", tone: "success" };
+};
+
+interface StatusIndicator {
+  readonly key: string;
+  readonly label: string;
+  readonly tone: "warning" | "partial" | "critical" | "neutral";
+  readonly icon: "warning" | "partial" | "read-issue" | "hidden" | "locked";
+  readonly count?: number;
+}
+
+const targetStatusIndicators = (target: InspectorTarget): readonly StatusIndicator[] => [
+  ...(target.readError ? [{ key: "read-error", label: "Motion read issue", tone: "critical" as const, icon: "read-issue" as const }] : []),
+  ...(!target.visible ? [{ key: "hidden", label: "Hidden layer", tone: "warning" as const, icon: "hidden" as const }] : []),
+  ...(target.locked ? [{ key: "locked", label: "Locked layer", tone: "warning" as const, icon: "locked" as const }] : []),
+  ...(target.warnings.length > 0
+    ? [{
+        key: "warnings",
+        label: `${String(target.warnings.length)} warning${target.warnings.length === 1 ? "" : "s"}`,
+        tone: "warning" as const,
+        icon: "warning" as const,
+        count: target.warnings.length
+      }]
+    : []),
+  ...(target.limitations.length > 0
+    ? [{
+        key: "limitations",
+        label: "Partially editable",
+        tone: "partial" as const,
+        icon: "partial" as const
+      }]
+    : [])
+];
+
+const sourceExplanation = (sourceKind: MotionSourceKind): string =>
+  sourceKind === "manual"
+    ? "Manual Motion tracks are present on this layer."
+    : sourceKind === "style"
+      ? "This layer uses an animation style."
+      : sourceKind === "mixed"
+        ? "This layer combines manual Motion and style-derived Motion."
+        : "No native Figma Motion was found on this layer.";
+
+const selectedTargetSummary = (target: InspectorTarget, groups: ReturnType<typeof groupInspectorTarget> | null): string => {
+  if (target.readError) {
+    return "MotionOps could not read Motion data for this layer. Reveal it in Figma and try inspecting again.";
+  }
+  if (groups === null || target.sourceKind === "none") {
+    return "No native Figma Motion was found on this layer.";
+  }
+  const propertyCount = animatedPropertyCount(groups);
+  const tracks = groups.manualGroups.reduce((count, group) => count + group.tracks.length, 0);
+  const keyframes = totalKeyframes(groups);
+  const duration = longestTrackDurationMs(groups);
+  if (target.sourceKind === "style") {
+    return "This layer uses an animation style. MotionOps can inspect the style assignment, but editing support is limited.";
+  }
+  if (target.limitations.length > 0) {
+    return `This layer has ${formatCount(tracks, "editable manual track")} and ${formatCount(target.limitations.length, "read-only detail")}. Derived Figma Motion details are available for inspection only.`;
+  }
+  return `This layer has ${formatCount(propertyCount, "animated property", "animated properties")} across ${formatCount(tracks, "manual track")} and ${formatCount(keyframes, "keyframe")}.${duration === null ? "" : ` The longest track is ${formatMilliseconds(duration)}.`}`;
 };
 
 const modeOptions = (debugEnabled: boolean): readonly SelectOption<InspectorMode>[] =>
   [
-    { value: "compact", label: "Compact" },
-    { value: "detailed", label: "Detailed" },
+    { value: "overview", label: "Overview" },
+    { value: "details", label: "Details" },
     debugEnabled ? { value: "debug", label: "Debug" } : null
   ].filter((option): option is SelectOption<InspectorMode> => option !== null);
+
+const TruncatedText = ({
+  children,
+  className,
+  tooltip
+}: {
+  readonly children: string;
+  readonly className?: string;
+  readonly tooltip?: string;
+}) => {
+  const ref = useRef<HTMLSpanElement | null>(null);
+  const [truncated, setTruncated] = useState(false);
+
+  useLayoutEffect(() => {
+    const element = ref.current;
+    if (!element) {
+      return;
+    }
+    const update = () => {
+      setTruncated(element.scrollWidth > element.clientWidth + 1);
+    };
+    update();
+    const frame = window.requestAnimationFrame(update);
+    const timer = window.setTimeout(update, 0);
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(update);
+    observer?.observe(element);
+    window.addEventListener("resize", update);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.clearTimeout(timer);
+      observer?.disconnect();
+      window.removeEventListener("resize", update);
+    };
+  }, [children]);
+
+  const text = (
+    <span aria-label={children} className={className} ref={ref}>
+      {children}
+    </span>
+  );
+  return truncated || children.length > 48 ? <Tooltip content={tooltip ?? children}>{text}</Tooltip> : text;
+};
 
 export const InspectWorkspace = ({
   activeScope,
@@ -177,7 +272,7 @@ export const InspectWorkspace = ({
 }: InspectWorkspaceProps) => {
   const [state, setState] = useState<InspectState>({ status: "no-scope" });
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
-  const [mode, setMode] = useState<InspectorMode>("detailed");
+  const [mode, setMode] = useState<InspectorMode>("overview");
   const [filters, setFilters] = useState<InspectorFilters>(createDefaultInspectorFilters);
   const [revealMessage, setRevealMessage] = useState<string | null>(null);
   const debugEnabled = isDeveloperDebugEnabled();
@@ -263,7 +358,7 @@ export const InspectWorkspace = ({
 
   useEffect(() => {
     if (!debugEnabled && mode === "debug") {
-      setMode("detailed");
+      setMode("details");
     }
   }, [debugEnabled, mode]);
 
@@ -277,14 +372,13 @@ export const InspectWorkspace = ({
   };
 
   const renderTargetRow = (target: InspectorTarget) => {
-    const warningLabel = `${String(target.warnings.length)} warning${target.warnings.length === 1 ? "" : "s"}`;
-    const limitationLabel =
-      target.limitations.length === 1
-        ? "Partially editable"
-        : `${String(target.limitations.length)} limitations`;
+    const priorityIndicators = targetStatusIndicators(target);
+    const visibleIndicators = priorityIndicators.slice(0, target.sourceKind === "none" ? 2 : 1);
+    const hiddenIndicatorCount = Math.max(0, priorityIndicators.length - visibleIndicators.length);
 
     return (
       <button
+        aria-label={`${target.name}, ${nodeTypeLabel(target.nodeType)}, ${sourceKindLabel(target.sourceKind)}`}
         aria-pressed={selectedTargetId === target.nodeId}
         className="inspector-target-row"
         data-selected={selectedTargetId === target.nodeId}
@@ -297,41 +391,26 @@ export const InspectWorkspace = ({
       >
         <span className="inspector-target-main">
           <FigmaNodeIcon nodeType={target.nodeType} />
-          <span className="inspector-target-name" title={target.name}>{target.name}</span>
+          <TruncatedText className="inspector-target-name">{target.name}</TruncatedText>
         </span>
         <span className="inspector-target-indicators">
-          <MotionSourceIcon sourceKind={target.sourceKind} />
-          {target.warnings.length > 0 ? (
-            <span className="inspector-icon-token" data-tone="warning" title={warningLabel}>
-              <Icon name="warning" size={13} />
-              <span className="inspector-icon-count">{String(target.warnings.length)}</span>
-              <span className="visually-hidden">{warningLabel}</span>
-            </span>
+          {visibleIndicators.map((indicator) => (
+            <Tooltip content={indicator.label} key={indicator.key}>
+              <span className="inspector-icon-token" data-tone={indicator.tone}>
+                <Icon name={indicator.icon} size={13} />
+                {indicator.count ? <span className="inspector-icon-count">{String(indicator.count)}</span> : null}
+                <span className="visually-hidden">{indicator.label}</span>
+              </span>
+            </Tooltip>
+          ))}
+          {hiddenIndicatorCount > 0 ? (
+            <Tooltip content={priorityIndicators.slice(visibleIndicators.length).map((indicator) => indicator.label).join(", ")}>
+              <span className="inspector-icon-token" data-tone="neutral">
+                +{String(hiddenIndicatorCount)}
+              </span>
+            </Tooltip>
           ) : null}
-          {target.limitations.length > 0 ? (
-            <span className="inspector-icon-token" data-tone="partial" title={limitationLabel}>
-              <Icon name="partial" size={13} />
-              <span className="visually-hidden">{limitationLabel}</span>
-            </span>
-          ) : null}
-          {target.visible ? null : (
-            <span className="inspector-icon-token" data-tone="warning" title="Hidden layer">
-              <Icon name="hidden" size={13} />
-              <span className="visually-hidden">Hidden layer</span>
-            </span>
-          )}
-          {target.locked ? (
-            <span className="inspector-icon-token" data-tone="warning" title="Locked layer">
-              <Icon name="locked" size={13} />
-              <span className="visually-hidden">Locked layer</span>
-            </span>
-          ) : null}
-          {target.readError ? (
-            <span className="inspector-icon-token" data-tone="critical" title="Motion read issue">
-              <Icon name="read-issue" size={13} />
-              <span className="visually-hidden">Motion read issue</span>
-            </span>
-          ) : null}
+          {visibleIndicators.length + (hiddenIndicatorCount > 0 ? 1 : 0) < 2 ? <MotionSourceIcon sourceKind={target.sourceKind} /> : null}
         </span>
       </button>
     );
@@ -504,56 +583,50 @@ const InspectorDetail = ({
   const hasMotion =
     groups !== null &&
     (groups.manualGroups.length > 0 || groups.styleGroups.length > 0 || groups.derivedAnimations.length > 0);
-  const summary = targetSummary(target, groups);
-  const primaryBadge = primaryBadgeForTarget(target);
+  const capabilityStatus = capabilityStatusForTarget(target);
   return (
     <article className="inspector-detail-card" aria-label={`${target.name} Motion details`}>
       <header className="inspector-detail-header">
         <div className="inspector-detail-heading">
           <div className="inspector-detail-title-row">
             <FigmaNodeIcon nodeType={target.nodeType} size={15} />
-            <h3>{target.name}</h3>
-            {primaryBadge ? <Badge tone={primaryBadge.tone}>{primaryBadge.label}</Badge> : null}
+            <h3><TruncatedText>{target.name}</TruncatedText></h3>
+            <Badge tone={capabilityStatus.tone}>{capabilityStatus.label}</Badge>
           </div>
           <div className="inspector-detail-meta">
             <span>{nodeTypeLabel(target.nodeType)}</span>
             <MotionSourceIcon sourceKind={target.sourceKind} />
             <span>{sourceKindLabel(target.sourceKind)}</span>
-            {target.visible ? null : <Icon name="hidden" size={13} />}
-            {target.locked ? <Icon name="locked" size={13} /> : null}
+            {target.visible ? null : (
+              <Tooltip content="Hidden layer">
+                <span className="inspector-icon-token" data-tone="warning"><Icon name="hidden" size={13} /></span>
+              </Tooltip>
+            )}
+            {target.locked ? (
+              <Tooltip content="Locked layer">
+                <span className="inspector-icon-token" data-tone="warning"><Icon name="locked" size={13} /></span>
+              </Tooltip>
+            ) : null}
           </div>
         </div>
         <button
-          className="secondary-action"
+          className="inspector-reveal-action"
           aria-label={`Reveal ${target.name} in Figma`}
           onClick={() => {
             onReveal(target);
           }}
           type="button"
-        ><Icon name="eye" size={13} /><span>Reveal</span></button>
+        >
+          <Tooltip content="Reveal in Figma"><Icon name="eye" size={13} /></Tooltip>
+        </button>
       </header>
 
-      <dl className="inspector-summary-grid">
-        {summary.map(([label, value]) => (
-          <div key={label}>
-            <dt>{label}</dt>
-            <dd>{value}</dd>
-          </div>
-        ))}
-      </dl>
+      <p className="inspector-plain-summary">{selectedTargetSummary(target, groups)}</p>
+
+      {groups !== null ? <MetricStrip groups={groups} /> : null}
 
       {target.readError ? <div className="scope-state scope-state-error">{target.readError}</div> : null}
-      {target.limitations.length > 0 ? (
-        <section className="inspector-limitation-banner" aria-labelledby="inspector-limitation-title">
-          {target.limitations.map((limitation, index) => (
-            <div className="inspector-limitation-item" key={`${limitation.code}:${limitation.path ?? ""}:${limitation.message}`}>
-              <h4 id={index === 0 ? "inspector-limitation-title" : undefined}>{limitation.title}</h4>
-              <p>{limitation.message}</p>
-              {limitation.impact ? <p>{limitation.impact}</p> : null}
-            </div>
-          ))}
-        </section>
-      ) : null}
+      <CapabilityOverview target={target} />
       {target.warnings.length > 0 ? (
         <section className="inspector-section">
           <h4>Warnings</h4>
@@ -572,12 +645,12 @@ const InspectorDetail = ({
       {groups === null || !hasMotion ? (
         <>
           <EmptyState title="No Motion animation found">
-            This layer does not expose manual animation tracks or animation style instances.
+            No native Figma Motion was found on this layer.
           </EmptyState>
           {groups !== null && groups.timelines.length > 0 ? <TimelineSummary groups={groups} mode={mode} /> : null}
         </>
-      ) : mode === "compact" ? (
-        <CompactDetail groups={groups} />
+      ) : mode === "overview" ? (
+        <OverviewDetail groups={groups} />
       ) : (
         <>
           <ManualDetail groups={groups} mode={mode} />
@@ -608,9 +681,138 @@ const InspectorDetail = ({
   );
 };
 
-const CompactDetail = ({ groups }: { readonly groups: ReturnType<typeof groupInspectorTarget> }) => (
+const MetricCard = ({
+  icon,
+  label,
+  tone,
+  tooltip,
+  value,
+  detail
+}: {
+  readonly icon: IconName;
+  readonly label: string;
+  readonly tone: "purple" | "blue" | "green" | "yellow";
+  readonly tooltip: string;
+  readonly value: string;
+  readonly detail?: string;
+}) => (
+  <div className="inspector-metric-card" data-tone={tone}>
+    <Tooltip content={tooltip}>
+      <Icon name={icon} size={14} />
+    </Tooltip>
+    <div>
+      <dt>{label}</dt>
+      <dd>{value}</dd>
+      {detail ? <span>{detail}</span> : null}
+    </div>
+  </div>
+);
+
+const MetricStrip = ({ groups }: { readonly groups: ReturnType<typeof groupInspectorTarget> }) => {
+  const tracks = groups.manualGroups.reduce((count, group) => count + group.tracks.length, 0);
+  const trackDuration = longestTrackDurationMs(groups);
+  const timelineDuration = timelineDurationMs(groups);
+  return (
+    <dl className="inspector-summary-grid">
+      <MetricCard
+        icon="sparkles"
+        label="Animated properties"
+        tone="purple"
+        tooltip="Properties with exposed manual tracks or derived Figma Motion details."
+        value={String(animatedPropertyCount(groups))}
+      />
+      <MetricCard
+        icon="manual-motion"
+        label="Tracks"
+        tone="blue"
+        tooltip="Manual Motion tracks that MotionOps can inspect on this layer."
+        value={String(tracks)}
+      />
+      <MetricCard
+        icon="layers"
+        label="Keyframes"
+        tone="green"
+        tooltip="Exposed manual keyframes across the selected layer."
+        value={String(totalKeyframes(groups))}
+      />
+      <MetricCard
+        icon="timing"
+        label="Timing"
+        tone="yellow"
+        tooltip="Track duration is the longest exposed Motion track. Timeline duration is the containing Figma Motion timeline."
+        value={trackDuration === null ? "Not exposed" : formatMilliseconds(trackDuration)}
+        detail={timelineDuration === null ? undefined : `Timeline: ${formatMilliseconds(timelineDuration)}`}
+      />
+    </dl>
+  );
+};
+
+const CapabilityOverview = ({ target }: { readonly target: InspectorTarget }) => {
+  const [expanded, setExpanded] = useState(false);
+  if (target.readError) {
+    return (
+      <section className="inspector-capability-summary" data-tone="critical">
+        <Icon name="read-issue" size={14} />
+        <p>Motion read failed. Reveal the layer in Figma, confirm it still exists, and inspect again.</p>
+      </section>
+    );
+  }
+  if (target.limitations.length === 0) {
+    return (
+      <section className="inspector-capability-summary" data-tone={target.sourceKind === "none" ? "neutral" : "success"}>
+        <Icon name={target.sourceKind === "none" ? "motion-off" : "check"} size={14} />
+        <p>{sourceExplanation(target.sourceKind)}</p>
+      </section>
+    );
+  }
+
+  const uniqueProperties = [
+    ...new Set(target.limitations.map((limitation) => limitation.path ?? limitation.title))
+  ];
+  const visibleProperties = uniqueProperties.slice(0, expanded ? uniqueProperties.length : 4);
+  const moreCount = uniqueProperties.length - visibleProperties.length;
+  const hasManualTracks = (target.snapshot?.manualTracks.length ?? 0) > 0;
+
+  return (
+    <section className="inspector-capability-summary" data-tone="warning" aria-labelledby="inspector-capability-title">
+      <Icon name="partial" size={14} />
+      <div>
+        <h4 id="inspector-capability-title">{hasManualTracks ? "Manual tracks are editable. Derived details are read-only." : "This Motion can be inspected but not edited by MotionOps."}</h4>
+        <p>
+          {hasManualTracks
+            ? `${formatCount(target.limitations.length, "derived Figma Motion detail")} can be inspected but cannot be changed safely.`
+            : `${formatCount(target.limitations.length, "Figma Motion detail")} can be inspected but cannot be changed safely.`}
+        </p>
+        <button
+          className="inspector-inline-action"
+          onClick={() => {
+            setExpanded((current) => !current);
+          }}
+          type="button"
+        >
+          {expanded ? "Hide read-only details" : `View ${String(target.limitations.length)} read-only details`}
+        </button>
+        {expanded ? (
+          <>
+            <ul className="inspector-limitation-list">
+              {visibleProperties.map((property) => (
+                <li key={property}>{humanizePropertyName(property)} - derived details are read-only</li>
+              ))}
+              {moreCount > 0 ? <li>+{String(moreCount)} more</li> : null}
+            </ul>
+            <p className="inspector-shared-explanation">
+              These values come from derived Figma Motion data. MotionOps can inspect them, but Edit and Sequence will not modify them.
+            </p>
+          </>
+        ) : null}
+      </div>
+    </section>
+  );
+};
+
+const OverviewDetail = ({ groups }: { readonly groups: ReturnType<typeof groupInspectorTarget> }) => (
   <section className="inspector-section">
-    <h4>Summary</h4>
+    <h4>Editability summary</h4>
     <p>
       {formatCount(groups.manualGroups.length, "manual property group")},{" "}
       {formatCount(groups.styleGroups.length, "animation style")},{" "}
@@ -627,11 +829,11 @@ const ManualDetail = ({
   readonly mode: InspectorMode;
 }) => (
   <section className="inspector-section">
-    <h4>Manual tracks</h4>
+    <h4>Animation tracks ({String(groups.manualGroups.reduce((count, group) => count + group.tracks.length, 0))})</h4>
     {groups.manualGroups.length > 0 ? (
       groups.manualGroups.map((group) => (
         <div className="inspector-subsection" key={group.property}>
-          <h5>{humanizePropertyName(group.property)} track</h5>
+          <h5>{humanizePropertyName(group.property)}</h5>
           {group.tracks.map((track, index) => (
             <table className="keyframe-table" key={`${group.property}:${track.trackId ?? String(index)}`}>
               <caption>
@@ -643,7 +845,7 @@ const ManualDetail = ({
                 ) : (
                   <>
                     <span className="manual-track-caption">
-                      <strong>{humanizePropertyName(track.property)} track</strong>
+                      <strong>{humanizePropertyName(track.property)}</strong>
                       <span>Manual · {formatMilliseconds(trackTiming(track).durationMs)}</span>
                     </span>
                   </>
@@ -662,7 +864,7 @@ const ManualDetail = ({
                   <tr key={`${keyframe.keyframeId ?? "ordinal"}:${String(keyframe.ordinal)}:${String(keyframe.timeMs)}`}>
                     <td>{formatMilliseconds(keyframe.timeMs)}</td>
                     <td>{mode === "debug" ? formatValue(keyframe.value) : formatMotionValue(track.property, keyframe.value)}</td>
-                    <td>{formatEasing(keyframe.easing)}</td>
+                    <td><EasingValue easing={formatEasing(keyframe.easing)} /></td>
                     {mode === "debug" ? <td>{keyframe.keyframeId ?? "Not exposed"}</td> : null}
                   </tr>
                 ))}
@@ -674,6 +876,20 @@ const ManualDetail = ({
     ) : null}
   </section>
 );
+
+const EasingValue = ({ easing }: { readonly easing: string }) => {
+  const compact =
+    easing.startsWith("Cubic bezier")
+      ? "Custom"
+      : easing === "EASE_IN"
+        ? "Ease in"
+        : easing === "EASE_OUT"
+          ? "Ease out"
+          : easing === "EASE_IN_AND_OUT" || easing === "EASE_IN_OUT"
+            ? "Ease in/out"
+            : easing;
+  return compact === easing ? <span>{compact}</span> : <Tooltip content={easing}><span className="inspector-easing-chip">{compact}</span></Tooltip>;
+};
 
 const AnimationStyleDetail = ({
   groups,

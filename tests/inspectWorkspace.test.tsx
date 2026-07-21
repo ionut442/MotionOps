@@ -175,36 +175,49 @@ describe("Inspect workspace", () => {
 
     expect(container.textContent).toContain("Manual Layer");
     expect(container.textContent).toContain("Mixed Layer");
-    expect(container.textContent).toContain("Manual tracks");
-    expect(container.textContent).toContain("Opacity track");
-    expect(container.textContent).toContain("Manual · 500 ms");
+    expect(container.textContent).toContain("Overview");
+    expect(container.textContent).toContain("Details");
+    expect(container.textContent).toContain("This layer has 1 animated property across 1 manual track and 2 keyframes.");
+    expect(container.textContent).toContain("Animated properties");
+    expect(container.textContent).toContain("Timing");
+    expect(container.textContent).not.toContain("Opacity track");
+    expect(container.textContent).not.toContain("Manual · 500 ms");
     expect(container.textContent).not.toContain("Opacity track - Partially editable");
     expect(container.textContent).toContain("500 ms");
-    expect(container.textContent).toContain("0%");
-    expect(container.textContent).toContain("100%");
-    expect(container.textContent).toContain("Track duration");
-    expect(container.textContent).toContain("Rectangle · Manual");
+    expect(container.textContent).not.toContain("0%");
+    expect(container.textContent).not.toContain("100%");
+    expect(container.textContent).not.toContain("Track duration");
+    expect(container.textContent).toContain("Rectangle");
+    expect(container.textContent).toContain("Manual");
     expect(container.textContent).not.toContain("Node type");
     expect(container.textContent).not.toContain("{ type: FLOAT");
     expect(container.textContent).not.toContain("Main timing");
     expect(container.textContent).not.toContain("Animation styles and derived data");
     expect(container.textContent).not.toContain("No animation styles");
 
+    click(Array.from(container.querySelectorAll('[role="radio"]')).find((button) => button.textContent === "Details") ?? null);
+    expect(container.textContent).toContain("Animation tracks (1)");
+    expect(container.textContent).toContain("Opacity");
+    expect(container.textContent).toContain("Manual · 500 ms");
+    expect(container.textContent).not.toContain("Opacity track");
+    expect(container.textContent).toContain("0%");
+    expect(container.textContent).toContain("100%");
+
     chooseComboboxOption("Source", "Mixed");
     expect(container.textContent).not.toContain("Manual Layer");
     expect(container.textContent).toContain("Mixed Layer");
-    expect(container.textContent).toContain("Frame · Mixed");
+    expect(container.textContent).toContain("Frame");
+    expect(container.textContent).toContain("Mixed");
 
-    const limitationBanner = container.querySelector(".inspector-limitation-banner");
-    expect(limitationBanner).toBeTruthy();
-    expect(limitationBanner?.querySelector("h4")?.textContent).toBe("Some opacity details are read-only");
-    expect(limitationBanner?.querySelectorAll("p")[0]?.textContent).toBe(
-      "MotionOps can inspect the manual opacity track, but some derived Figma animation data cannot be edited safely."
-    );
-    expect(limitationBanner?.querySelectorAll("p")[1]?.textContent).toBe(
-      "The manual track remains editable. Derived animation details are read-only and will not be modified by Edit or Sequence."
-    );
-    expect(limitationBanner?.querySelector("ul")).toBeNull();
+    const capabilitySummary = container.querySelector(".inspector-capability-summary");
+    expect(capabilitySummary).toBeTruthy();
+    if (capabilitySummary === null) throw new Error("missing capability summary");
+    expect(capabilitySummary.querySelector("h4")?.textContent).toBe("Manual tracks are editable. Derived details are read-only.");
+    expect(capabilitySummary.textContent).toContain("View 1 read-only details");
+    expect(capabilitySummary.textContent.match(/These values come from derived Figma Motion data/g)).toBeNull();
+    click(capabilitySummary.querySelector("button"));
+    expect(capabilitySummary.textContent).toContain("Opacity - derived details are read-only");
+    expect(capabilitySummary.textContent.match(/These values come from derived Figma Motion data/g)?.length).toBe(1);
     expect(Array.from(container.querySelectorAll(".inspector-section h4")).map((heading) => heading.textContent)).not.toContain(
       "Derived animation"
     );

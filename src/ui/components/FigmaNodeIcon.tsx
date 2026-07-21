@@ -1,4 +1,5 @@
 import { Icon, type IconName } from "./Icon";
+import { Tooltip } from "./ui";
 
 const iconForNodeType = (nodeType: string): IconName => {
   switch (nodeType.toUpperCase()) {
@@ -40,10 +41,12 @@ export const FigmaNodeIcon = ({
   readonly nodeType: string;
   readonly size?: number;
 }) => (
-  <span className="figma-node-icon" data-node-type={nodeType.toLowerCase()} title={labelForNodeType(nodeType)}>
-    <Icon name={iconForNodeType(nodeType)} size={size} />
-    <span className="visually-hidden">{labelForNodeType(nodeType)}</span>
-  </span>
+  <Tooltip content={labelForNodeType(nodeType)}>
+    <span className="figma-node-icon" data-node-type={nodeType.toLowerCase()}>
+      <Icon name={iconForNodeType(nodeType)} size={size} />
+      <span className="visually-hidden">{labelForNodeType(nodeType)}</span>
+    </span>
+  </Tooltip>
 );
 
 export const MotionSourceIcon = ({
@@ -63,9 +66,11 @@ export const MotionSourceIcon = ({
           : { icon: "motion-off", label: "No Motion" };
 
   return (
-    <span className="inspector-icon-token" data-kind={sourceKind} title={presentation.label}>
-      <Icon name={presentation.icon} size={size} />
-      <span className="visually-hidden">{presentation.label}</span>
-    </span>
+    <Tooltip content={presentation.label}>
+      <span className="inspector-icon-token" data-kind={sourceKind}>
+        <Icon name={presentation.icon} size={size} />
+        <span className="visually-hidden">{presentation.label}</span>
+      </span>
+    </Tooltip>
   );
 };
