@@ -40,7 +40,7 @@ export const FigmaNodeIcon = ({
   readonly nodeType: string;
   readonly size?: number;
 }) => (
-  <span className="figma-node-icon" title={labelForNodeType(nodeType)}>
+  <span className="figma-node-icon" data-node-type={nodeType.toLowerCase()} title={labelForNodeType(nodeType)}>
     <Icon name={iconForNodeType(nodeType)} size={size} />
     <span className="visually-hidden">{labelForNodeType(nodeType)}</span>
   </span>

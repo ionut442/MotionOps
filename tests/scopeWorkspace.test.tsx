@@ -163,6 +163,35 @@ const chooseComboboxOption = (name: string, optionName: string) => {
   });
 };
 
+const clickButtonByName = (container: HTMLElement, name: string) => {
+  const button = requireValue(
+    Array.from(container.querySelectorAll("button")).find(
+      (candidate) => candidate.textContent === name || candidate.getAttribute("aria-label") === name
+    ),
+    `Expected ${name} button.`
+  );
+  act(() => {
+    button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  });
+  return button;
+};
+
+const currentScopeModeLabel = (container: HTMLElement): string | undefined =>
+  Array.from(container.querySelectorAll<HTMLInputElement>('input[name="scope-mode"]')).find(
+    (candidate) => candidate.checked
+  )?.parentElement?.textContent ?? undefined;
+
+const expandControls = (container: HTMLElement) => {
+  const groupExpand = Array.from(container.querySelectorAll("button")).find((button) =>
+    button.getAttribute("aria-label")?.includes("Expand Controls")
+  );
+  act(() => {
+    requireValue(groupExpand, "Expected Controls expand button.").dispatchEvent(
+      new MouseEvent("click", { bubbles: true })
+    );
+  });
+};
+
 afterEach(() => {
   vi.restoreAllMocks();
   for (const root of roots.splice(0)) {
@@ -279,6 +308,76 @@ describe("Scope workspace hierarchy", () => {
       "Expected Controls checkbox."
     );
     expect(checkbox.checked).toBe(false);
+    expect(currentScopeModeLabel(container)).toBe("Manual");
+  });
+
+  test("switches presets to Manual after individual, branch, and bulk inclusion changes without rescanning", () => {
+    const individual = renderApp();
+    postPluginMessage({
+      type: "SCOPE_SCAN_RESULT",
+      requestId: individual.getScopeRequestId(),
+      result: sampleResult
+    });
+    expandControls(individual.container);
+    const individualRequests = individual.getScopeRequests().length;
+    const hidden = requireValue(
+      individual.container.querySelector<HTMLInputElement>('input[aria-label="Include in scope: Hidden Copy"]'),
+      "Expected Hidden Copy checkbox."
+    );
+    act(() => {
+      hidden.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(currentScopeModeLabel(individual.container)).toBe("Manual");
+    expect(individual.getScopeRequests()).toHaveLength(individualRequests);
+
+    const directChildren = requireValue(
+      Array.from(individual.container.querySelectorAll<HTMLInputElement>('input[name="scope-mode"]')).find(
+        (candidate) => candidate.parentElement?.textContent === "Direct children"
+      ),
+      "Expected Direct children mode input."
+    );
+    act(() => {
+      directChildren.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    postPluginMessage({
+      type: "SCOPE_SCAN_RESULT",
+      requestId: individual.getScopeRequestId(),
+      result: sampleResult
+    });
+    expandControls(individual.container);
+    const branchRequests = individual.getScopeRequests().length;
+    const controls = requireValue(
+      individual.container.querySelector<HTMLInputElement>('input[aria-label="Include in scope: Controls"]'),
+      "Expected Controls checkbox."
+    );
+    act(() => {
+      controls.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(currentScopeModeLabel(individual.container)).toBe("Manual");
+    expect(individual.getScopeRequests()).toHaveLength(branchRequests);
+
+    const allDescendants = requireValue(
+      Array.from(individual.container.querySelectorAll<HTMLInputElement>('input[name="scope-mode"]')).find(
+        (candidate) => candidate.parentElement?.textContent === "All descendants"
+      ),
+      "Expected All descendants mode input."
+    );
+    act(() => {
+      allDescendants.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    postPluginMessage({
+      type: "SCOPE_SCAN_RESULT",
+      requestId: individual.getScopeRequestId(),
+      result: sampleResult
+    });
+    const bulkRequests = individual.getScopeRequests().length;
+    clickButtonByName(individual.container, "Deselect all");
+    expect(currentScopeModeLabel(individual.container)).toBe("Manual");
+    expect(individual.getScopeRequests()).toHaveLength(bulkRequests);
+    expect(individual.container.textContent).toContain("Include at least one layer");
+    clickButtonByName(individual.container, "Select all");
+    expect(currentScopeModeLabel(individual.container)).toBe("Manual");
+    expect(individual.getScopeRequests()).toHaveLength(bulkRequests);
   });
 
   test("maps all five mode controls to canonical Scope requests", () => {
@@ -369,6 +468,7 @@ describe("Scope workspace hierarchy", () => {
     });
     expect(container.textContent).toContain("Custom order changes MotionOps processing order");
     expect(getScopeRequests()).toHaveLength(requestCount);
+    expect(currentScopeModeLabel(container)).toBe("Current selection");
 
     const reset = requireValue(
       Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Reset custom order"),
@@ -394,6 +494,7 @@ describe("Scope workspace hierarchy", () => {
     act(() => {
       reveal.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
+    expect(currentScopeModeLabel(container)).toBe("Current selection");
     const revealRequest = postMessage.mock.calls
       .map(([payload]) =>
         typeof payload === "object" && payload !== null && "pluginMessage" in payload
@@ -506,6 +607,7 @@ describe("Scope workspace hierarchy", () => {
     });
     expect(container.textContent).toContain("Hidden Copy");
     expect(getScopeRequests()).toHaveLength(requestCount);
+    expect(currentScopeModeLabel(container)).toBe("Current selection");
   });
 
   test("filters hidden, locked, and node types while preserving safe indicators when visible", () => {
@@ -516,14 +618,7 @@ describe("Scope workspace hierarchy", () => {
       result: sampleResult
     });
 
-    const groupExpand = Array.from(container.querySelectorAll("button")).find((button) =>
-      button.getAttribute("aria-label")?.includes("Expand Controls")
-    );
-    act(() => {
-      requireValue(groupExpand, "Expected Controls expand button.").dispatchEvent(
-        new MouseEvent("click", { bubbles: true })
-      );
-    });
+    expandControls(container);
     expect(container.textContent).toContain("Hidden");
     expect(container.textContent).toContain("Locked");
 
@@ -543,18 +638,28 @@ describe("Scope workspace hierarchy", () => {
     expect(container.textContent).not.toContain("Hidden Copy");
     expect(container.textContent).toContain("Locked Icon");
 
-    const vectorTypeLabel = requireValue(
-      Array.from(container.querySelectorAll("label")).find((label) => label.textContent === "vector"),
-      "Expected vector type label."
-    );
-    const vectorTypeInput = requireValue(
-      vectorTypeLabel.querySelector<HTMLInputElement>("input"),
-      "Expected vector type input."
+    const typeTrigger = requireValue(
+      document.querySelector('[role="combobox"][aria-label="Node type filters"]'),
+      "Expected node type filter trigger."
     );
     act(() => {
-      vectorTypeInput.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      typeTrigger.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    const vectorOption = requireValue(
+      Array.from(document.querySelectorAll('[role="option"]')).find((entry) => entry.textContent === "Vector"),
+      "Expected Vector type option."
+    );
+    act(() => {
+      vectorOption.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
     expect(container.textContent).toContain("Locked Icon");
     expect(container.textContent).not.toContain("Controls");
+    expect(typeTrigger.textContent).toContain("Vector");
+    expect(currentScopeModeLabel(container)).toBe("Current selection");
+
+    act(() => {
+      typeTrigger.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    });
+    expect(document.querySelector('[role="listbox"][aria-label="Node type filters"]')).toBeNull();
   });
 });
