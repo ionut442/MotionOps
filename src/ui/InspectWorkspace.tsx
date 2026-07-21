@@ -25,6 +25,7 @@ import type { ScopeScanResult } from "../domain/scopeScan";
 import type { CapabilityStatus, MotionSourceKind } from "../domain/motion";
 import type { PluginToUiMessage, UiToPluginMessage } from "../shared/messages";
 import { Badge, EmptyState, SegmentedControl, Select, type SelectOption } from "./components/ui";
+import { Icon } from "./components/Icon";
 
 export interface InspectWorkspaceProps {
   readonly activeScope: ScopeScanResult | null;
@@ -430,9 +431,7 @@ export const InspectWorkspace = ({
                 setFilters(createDefaultInspectorFilters());
               }}
               type="button"
-            >
-              Clear
-            </button>
+            ><Icon name="filter" size={13} /><span>Clear</span></button>
             <span className="inspect-filter-count">
               {String(filteredTargets.length)} of {String(targets.length)} targets
             </span>
@@ -493,9 +492,7 @@ const InspectorDetail = ({
             onReveal(target);
           }}
           type="button"
-        >
-          Reveal
-        </button>
+        ><Icon name="eye" size={13} /><span>Reveal</span></button>
       </header>
 
       <dl className="inspector-summary-grid">
