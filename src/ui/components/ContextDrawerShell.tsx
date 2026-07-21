@@ -1,5 +1,6 @@
 import { useEffect, useId, type ReactNode } from "react";
 import { getContextDrawerModePresentation, type ContextDrawerMode } from "../contextDrawerMode";
+import { Icon } from "./Icon";
 
 export interface ContextDrawerShellProps {
   open: boolean;
@@ -72,7 +73,7 @@ export const ContextDrawerShell = ({
           onClick={onClose}
           type="button"
         >
-          <span aria-hidden="true">x</span>
+          <Icon name="close" size={15} />
         </button>
       </div>
 
