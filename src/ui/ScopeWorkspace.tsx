@@ -80,7 +80,12 @@ const ORDER_LABELS: Record<ScopeOrderMode, string> = {
   custom: "Custom"
 };
 
-const nodeTypeLabel = (type: string): string => type.toLowerCase().replaceAll("_", " ");
+const nodeTypeLabel = (type: string): string =>
+  type
+    .toLowerCase()
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
 
 const childLookup = (nodes: readonly ScopeScanNode[]): Map<string | null, ScopeScanNode[]> => {
   const lookup = new Map<string | null, ScopeScanNode[]>();
@@ -768,6 +773,7 @@ export const ScopeWorkspace = ({
                 }}
                 type="checkbox"
               />
+              <FigmaNodeIcon nodeType={type} size={12} />
               <span>{nodeTypeLabel(type)}</span>
             </label>
           ))}
@@ -871,8 +877,6 @@ export const ScopeWorkspace = ({
         <button className="secondary-action" disabled={!hasPendingChanges} onClick={resetDraft} type="button"><Icon name="undo" size={13} /><span>Reset</span></button>
         <button className="primary-action" disabled={draftScopeResult === null} onClick={confirmScope} type="button"><Icon name="check" size={13} /><span>Confirm scope</span></button>
       </div>
-
-      <p className="scope-field-note">Animated-only filtering is unavailable until Scope scans can read Motion presence reliably.</p>
     </section>
   );
 };
