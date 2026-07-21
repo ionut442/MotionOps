@@ -1,9 +1,10 @@
 import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-const redesignCss = readFileSync(new URL("../src/ui/redesign.css", import.meta.url), "utf8");
-const inspectSource = readFileSync(new URL("../src/ui/InspectWorkspace.tsx", import.meta.url), "utf8");
-const scopeSource = readFileSync(new URL("../src/ui/ScopeWorkspace.tsx", import.meta.url), "utf8");
+const redesignCss = readFileSync(join(process.cwd(), "src/ui/redesign.css"), "utf8");
+const inspectSource = readFileSync(join(process.cwd(), "src/ui/InspectWorkspace.tsx"), "utf8");
+const scopeSource = readFileSync(join(process.cwd(), "src/ui/ScopeWorkspace.tsx"), "utf8");
 
 const ruleFor = (selector: string): string => {
   const start = redesignCss.lastIndexOf(selector);
@@ -29,6 +30,14 @@ describe("UI responsive contracts", () => {
     expect(redesignCss).toContain("background: #ececf0 !important");
     expect(redesignCss).toContain(".scope-action-bar > button > span");
     expect(scopeSource).toContain('disabled={draftScopeResult === null}');
+  });
+
+  it("stretches every workspace panel to the content column", () => {
+    expect(redesignCss).toMatch(/\.workspace-panel\s*{[^}]*align-self:\s*stretch;[^}]*place-content:\s*stretch;[^}]*width:\s*100%;/s);
+    expect(redesignCss).toMatch(/\.workspace-panel\s*{[^}]*justify-items:\s*stretch;[^}]*place-content:\s*stretch;/s);
+    expect(redesignCss).toMatch(
+      /\.scope-workspace,\s*\.inspect-workspace,\s*\.edit-workspace,\s*\.sequence-workspace,\s*\.review-workspace\s*{[^}]*width:\s*100%;/s
+    );
   });
 
   it("uses icon-led Scope and Inspector rows", () => {

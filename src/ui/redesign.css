@@ -489,8 +489,12 @@ textarea {
 /* Dense, authored controls */
 
 .workspace-panel {
+  align-self: stretch;
   gap: 8px;
+  justify-items: stretch;
   min-height: 0;
+  place-content: stretch;
+  width: 100%;
 }
 
 .workspace-panel h2 {
@@ -522,6 +526,7 @@ textarea {
   gap: 9px;
   min-height: 0;
   padding: 0 0 48px;
+  width: 100%;
 }
 
 .shell-main button:not(.workspace-tab):not(.stage-nav-button):not(.scope-expand):not(.scope-icon-action),
@@ -1281,8 +1286,11 @@ textarea {
 }
 
 .workspace-panel {
-  align-self: start;
+  align-self: stretch;
+  justify-items: stretch;
   min-height: 0;
+  place-content: stretch;
+  width: 100%;
 }
 
 .workspace-panel:has(.inspect-workspace) {
