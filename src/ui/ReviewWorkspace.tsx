@@ -10,6 +10,7 @@ import { ContextDrawerShell } from "./components/ContextDrawerShell";
 import { useApplicationStateDispatch } from "./applicationStateContext";
 import { copyHandoffText, exportHandoffFile } from "./handoffExport";
 import { Select } from "./components/ui";
+import { Icon } from "./components/Icon";
 
 interface ReviewWorkspaceProps {
   readonly activeScope: ScopeScanResult | null;
@@ -250,11 +251,11 @@ export const ReviewWorkspace = ({
             <div><dt>Target</dt><dd>{selectedIssue.nodeId ?? "Global"}</dd></div>
           </dl>
           <div className="review-actions">
-            <button onClick={() => { revealIssue(selectedIssue); }} type="button">Reveal node</button>
+            <button onClick={() => { revealIssue(selectedIssue); }} type="button"><Icon name="eye" size={13} /><span>Reveal node</span></button>
             <button onClick={() => { setIgnoredIssueIds((current) => [...current, selectedIssue.id]); }} type="button">Ignore once</button>
             <button onClick={() => { setReviewedIssueIds((current) => [...current, selectedIssue.id]); }} type="button">Mark reviewed</button>
             <button onClick={() => { setExceptions((current) => [...current, { id: `exception-${selectedIssue.id}`, scope: "rule", ruleId: selectedIssue.ruleId, nodeId: selectedIssue.nodeId, property: selectedIssue.property, reason: "Reviewed in QA." }]); }} type="button">Add exception</button>
-            <button disabled={selectedIssue.safeFix === undefined} onClick={() => { requestSafeFix(selectedIssue); }} type="button">Build safe fix</button>
+            <button disabled={selectedIssue.safeFix === undefined} onClick={() => { requestSafeFix(selectedIssue); }} type="button"><Icon name="sparkles" size={13} /><span>Build safe fix</span></button>
           </div>
         </ContextDrawerShell>
       );
@@ -273,9 +274,9 @@ export const ReviewWorkspace = ({
         <span className="edit-field-note">Active source: {standardSource}</span>
       </div>
       <div aria-label="Review tabs" className="edit-tabs" role="tablist">
-        <button aria-selected={tab === "standards"} onClick={() => { setTab("standards"); }} role="tab" type="button">Standards</button>
-        <button aria-selected={tab === "qa"} onClick={() => { setTab("qa"); }} role="tab" type="button">QA</button>
-        <button aria-selected={tab === "handoff"} onClick={() => { setTab("handoff"); }} role="tab" type="button">Handoff</button>
+        <button aria-selected={tab === "standards"} onClick={() => { setTab("standards"); }} role="tab" type="button"><Icon name="settings" size={13} /><span>Standards</span></button>
+        <button aria-selected={tab === "qa"} onClick={() => { setTab("qa"); }} role="tab" type="button"><Icon name="qa" size={13} /><span>QA</span></button>
+        <button aria-selected={tab === "handoff"} onClick={() => { setTab("handoff"); }} role="tab" type="button"><Icon name="handoff" size={13} /><span>Handoff</span></button>
       </div>
       {tab === "standards" ? (
         <section className="review-panel" aria-label="Standards">
@@ -285,10 +286,10 @@ export const ReviewWorkspace = ({
           </div>
           <textarea aria-label="Standards JSON" className="review-json" value={dirtyJson || exportStandardsJson(standards)} onChange={(event) => { setDirtyJson(event.currentTarget.value); }} />
           <div className="review-actions">
-            <button onClick={importJson} type="button">Validate import</button>
-            <button onClick={() => { setDirtyJson(exportStandardsJson(standards)); setStorageMessage("Exported deterministic JSON."); }} type="button">Export JSON</button>
-            <button onClick={savePersonal} type="button">Save personal</button>
-            <button onClick={saveFile} type="button">Save file standard</button>
+            <button onClick={importJson} type="button"><Icon name="check" size={13} /><span>Validate import</span></button>
+            <button onClick={() => { setDirtyJson(exportStandardsJson(standards)); setStorageMessage("Exported deterministic JSON."); }} type="button"><Icon name="handoff" size={13} /><span>Export JSON</span></button>
+            <button onClick={savePersonal} type="button"><Icon name="check" size={13} /><span>Save personal</span></button>
+            <button onClick={saveFile} type="button"><Icon name="check" size={13} /><span>Save file standard</span></button>
           </div>
           <div className="review-summary" aria-label="Standards summary">
             <span>{String(standards.tokens.length)} token(s)</span>
@@ -299,7 +300,7 @@ export const ReviewWorkspace = ({
       ) : tab === "qa" ? (
         <section className="review-panel" aria-label="QA">
           <div className="review-actions">
-            <button onClick={runQa} type="button">Run QA</button>
+            <button onClick={runQa} type="button"><Icon name="play" size={13} /><span>Run QA</span></button>
             <label className="scope-field">
               <span>Filter</span>
               <Select
@@ -352,13 +353,13 @@ export const ReviewWorkspace = ({
           </div>
           {currentReport.scope.staleState === "current" ? null : <p className="edit-field-note" role="status">Report data is {currentReport.scope.staleState}; rebuild after confirming Scope and running QA for current Motion.</p>}
           <div className="review-actions">
-            <button onClick={buildReport} type="button">Refresh report</button>
-            <button onClick={() => { setHandoffPreview("markdown"); }} aria-pressed={handoffPreview === "markdown"} type="button">Markdown preview</button>
-            <button onClick={() => { setHandoffPreview("json"); }} aria-pressed={handoffPreview === "json"} type="button">JSON preview</button>
-            <button onClick={() => { copyReport("markdown"); }} type="button">Copy Markdown</button>
-            <button onClick={() => { copyReport("json"); }} type="button">Copy JSON</button>
-            <button onClick={() => { exportReport("markdown"); }} type="button">Export Markdown</button>
-            <button onClick={() => { exportReport("json"); }} type="button">Export JSON</button>
+            <button onClick={buildReport} type="button"><Icon name="refresh" size={13} /><span>Refresh report</span></button>
+            <button onClick={() => { setHandoffPreview("markdown"); }} aria-pressed={handoffPreview === "markdown"} type="button"><Icon name="eye" size={13} /><span>Markdown preview</span></button>
+            <button onClick={() => { setHandoffPreview("json"); }} aria-pressed={handoffPreview === "json"} type="button"><Icon name="eye" size={13} /><span>JSON preview</span></button>
+            <button onClick={() => { copyReport("markdown"); }} type="button"><Icon name="copy" size={13} /><span>Copy Markdown</span></button>
+            <button onClick={() => { copyReport("json"); }} type="button"><Icon name="copy" size={13} /><span>Copy JSON</span></button>
+            <button onClick={() => { exportReport("markdown"); }} type="button"><Icon name="handoff" size={13} /><span>Export Markdown</span></button>
+            <button onClick={() => { exportReport("json"); }} type="button"><Icon name="handoff" size={13} /><span>Export JSON</span></button>
           </div>
           <pre className="handoff-preview" aria-label={handoffPreview === "markdown" ? "Markdown handoff preview" : "JSON handoff preview"}>
             {handoffPreview === "markdown" ? markdownPreview : jsonPreview}
