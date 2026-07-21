@@ -32,6 +32,8 @@ import {
 import type { ScopeScanNode, ScopeScanResult } from "../domain/scopeScan";
 import type { PluginToUiMessage, UiToPluginMessage } from "../shared/messages";
 import { Select } from "./components/ui";
+import { Icon } from "./components/Icon";
+import { FigmaNodeIcon } from "./components/FigmaNodeIcon";
 
 export interface ScopeWorkspaceProps {
   readonly lastMessage: PluginToUiMessage | null;
@@ -78,7 +80,12 @@ const ORDER_LABELS: Record<ScopeOrderMode, string> = {
   custom: "Custom"
 };
 
-const nodeTypeLabel = (type: string): string => type.toLowerCase().replaceAll("_", " ");
+const nodeTypeLabel = (type: string): string =>
+  type
+    .toLowerCase()
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
 
 const childLookup = (nodes: readonly ScopeScanNode[]): Map<string | null, ScopeScanNode[]> => {
   const lookup = new Map<string | null, ScopeScanNode[]>();
@@ -560,7 +567,7 @@ export const ScopeWorkspace = ({
             }}
             type="button"
           >
-            {hasRenderedChildren ? (isExpanded ? "v" : ">") : ""}
+            {hasRenderedChildren ? <Icon name={isExpanded ? "chevron-down" : "chevron-right"} size={12} /> : null}
           </button>
           <input
             aria-label={`Include in scope: ${node.name}`}
@@ -586,14 +593,22 @@ export const ScopeWorkspace = ({
               }}
               draggable
               type="button"
-            >
-              ::
-            </button>
+            ><Icon name="sequence" size={12} /></button>
           ) : null}
           <span className="scope-node-name">{node.name}</span>
-          <span className="scope-node-type">{nodeTypeLabel(node.type)}</span>
-          {node.visible ? null : <span className="scope-node-indicator">Hidden</span>}
-          {node.locked ? <span className="scope-node-indicator">Locked</span> : null}
+          <FigmaNodeIcon nodeType={node.type} />
+          {node.visible ? null : (
+            <span className="scope-state-icon" title="Hidden layer">
+              <Icon name="hidden" size={13} />
+              <span className="visually-hidden">Hidden layer</span>
+            </span>
+          )}
+          {node.locked ? (
+            <span className="scope-state-icon" title="Locked layer">
+              <Icon name="locked" size={13} />
+              <span className="visually-hidden">Locked layer</span>
+            </span>
+          ) : null}
           <button
             aria-label={`Reveal ${node.name} in Figma`}
             className="scope-row-action"
@@ -601,9 +616,7 @@ export const ScopeWorkspace = ({
               revealNode(node.id);
             }}
             type="button"
-          >
-            Reveal
-          </button>
+          ><Icon name="eye" size={13} /><span>Reveal</span></button>
           {order.mode === "custom" ? (
             <>
               <button
@@ -614,9 +627,7 @@ export const ScopeWorkspace = ({
                 }}
                 title="Move up in MotionOps target order"
                 type="button"
-              >
-                ^
-              </button>
+              ><Icon name="chevron-left" size={12} /></button>
               <button
                 aria-label={`Move ${node.name} down in MotionOps target order`}
                 className="scope-icon-action"
@@ -625,9 +636,7 @@ export const ScopeWorkspace = ({
                 }}
                 title="Move down in MotionOps target order"
                 type="button"
-              >
-                v
-              </button>
+              ><Icon name="chevron-right" size={12} /></button>
             </>
           ) : null}
         </div>
@@ -743,18 +752,14 @@ export const ScopeWorkspace = ({
             setFilters(createDefaultScopeFilters());
           }}
           type="button"
-        >
-          Clear filters
-        </button>
+        ><Icon name="filter" size={13} /><span>Clear filters</span></button>
         <button
           className="secondary-action"
           onClick={() => {
             requestScan(scopeDefinition);
           }}
           type="button"
-        >
-          Refresh
-        </button>
+        ><Icon name="refresh" size={13} /><span>Refresh</span></button>
       </div>
 
       {nodeTypes.length > 0 ? (
@@ -768,6 +773,7 @@ export const ScopeWorkspace = ({
                 }}
                 type="checkbox"
               />
+              <FigmaNodeIcon nodeType={type} size={12} />
               <span>{nodeTypeLabel(type)}</span>
             </label>
           ))}
@@ -777,7 +783,7 @@ export const ScopeWorkspace = ({
       {order.mode === "custom" ? (
         <div className="scope-order-note">
           <span>Custom order changes MotionOps processing order only, not Figma layer order.</span>
-          <button onClick={resetCustomOrder} type="button">Reset custom order</button>
+          <button onClick={resetCustomOrder} type="button"><Icon name="undo" size={13} /><span>Reset custom order</span></button>
         </div>
       ) : null}
 
@@ -789,9 +795,7 @@ export const ScopeWorkspace = ({
               : "Awaiting first Scope scan"}
           </span>
           {viewState.status === "scanning" ? (
-            <button onClick={cancelScan} type="button">
-              Cancel scan
-            </button>
+            <button onClick={cancelScan} type="button"><Icon name="close" size={13} /><span>Cancel scan</span></button>
           ) : null}
         </div>
       ) : null}
@@ -804,9 +808,7 @@ export const ScopeWorkspace = ({
               requestScan(scopeDefinition);
             }}
             type="button"
-          >
-            Refresh
-          </button>
+          ><Icon name="refresh" size={13} /><span>Refresh</span></button>
         </div>
       ) : null}
 
@@ -824,9 +826,7 @@ export const ScopeWorkspace = ({
               requestScan(scopeDefinition);
             }}
             type="button"
-          >
-            Retry
-          </button>
+          ><Icon name="refresh" size={13} /><span>Retry</span></button>
         </div>
       ) : null}
 
@@ -852,17 +852,13 @@ export const ScopeWorkspace = ({
                 setCheckedIds(new Set(filteredResult.nodes.map((node) => node.id)));
               }}
               type="button"
-            >
-              Select all
-            </button>
+            ><Icon name="check" size={13} /><span>Select all</span></button>
             <button
               onClick={() => {
                 setCheckedIds(new Set());
               }}
               type="button"
-            >
-              Deselect all
-            </button>
+            ><Icon name="minus" size={13} /><span>Deselect all</span></button>
           </div>
           <div aria-label="Scope hierarchy" className="scope-tree" role="tree">
             {renderRows(roots)}
@@ -878,15 +874,9 @@ export const ScopeWorkspace = ({
               ? "Confirm a Scope to share it with the other workspaces."
               : "Confirmed Scope is up to date."}
         </span>
-        <button className="secondary-action" disabled={!hasPendingChanges} onClick={resetDraft} type="button">
-          Reset
-        </button>
-        <button className="primary-action" disabled={draftScopeResult === null} onClick={confirmScope} type="button">
-          Confirm scope
-        </button>
+        <button className="secondary-action" disabled={!hasPendingChanges} onClick={resetDraft} type="button"><Icon name="undo" size={13} /><span>Reset</span></button>
+        <button className="primary-action" disabled={draftScopeResult === null} onClick={confirmScope} type="button"><Icon name="check" size={13} /><span>Confirm scope</span></button>
       </div>
-
-      <p className="scope-field-note">Animated-only filtering is unavailable until Scope scans can read Motion presence reliably.</p>
     </section>
   );
 };

@@ -25,6 +25,8 @@ import type { ScopeScanResult } from "../domain/scopeScan";
 import type { CapabilityStatus, MotionSourceKind } from "../domain/motion";
 import type { PluginToUiMessage, UiToPluginMessage } from "../shared/messages";
 import { Badge, EmptyState, SegmentedControl, Select, type SelectOption } from "./components/ui";
+import { Icon } from "./components/Icon";
+import { FigmaNodeIcon, MotionSourceIcon } from "./components/FigmaNodeIcon";
 
 export interface InspectWorkspaceProps {
   readonly activeScope: ScopeScanResult | null;
@@ -96,9 +98,6 @@ const selectPreferredTarget = (
 
 const formatCount = (count: number, singular: string, plural = `${singular}s`): string =>
   `${String(count)} ${count === 1 ? singular : plural}`;
-
-const targetMetadataLabel = (target: Pick<InspectorTarget, "nodeType" | "sourceKind">): string =>
-  `${nodeTypeLabel(target.nodeType)} · ${sourceKindLabel(target.sourceKind)}`;
 
 const firstTrackDuration = (groups: ReturnType<typeof groupInspectorTarget>): string | null => {
   const timings = groups.manualGroups.flatMap((group) => group.tracks.map(trackTiming));
@@ -278,7 +277,12 @@ export const InspectWorkspace = ({
   };
 
   const renderTargetRow = (target: InspectorTarget) => {
-    const primaryBadge = primaryBadgeForTarget(target);
+    const warningLabel = `${String(target.warnings.length)} warning${target.warnings.length === 1 ? "" : "s"}`;
+    const limitationLabel =
+      target.limitations.length === 1
+        ? "Partially editable"
+        : `${String(target.limitations.length)} limitations`;
+
     return (
       <button
         aria-pressed={selectedTargetId === target.nodeId}
@@ -291,15 +295,43 @@ export const InspectWorkspace = ({
         style={{ "--scope-depth": target.depth } as CSSProperties}
         type="button"
       >
-        <span className="inspector-target-primary">
+        <span className="inspector-target-main">
+          <FigmaNodeIcon nodeType={target.nodeType} />
           <span className="inspector-target-name" title={target.name}>{target.name}</span>
-          {primaryBadge ? <Badge tone={primaryBadge.tone}>{primaryBadge.label}</Badge> : null}
         </span>
-        <span className="inspector-target-meta">
-          <span>{targetMetadataLabel(target)}</span>
-          {target.visible ? null : <Badge tone="warning">Hidden</Badge>}
-          {target.locked ? <Badge tone="warning">Locked</Badge> : null}
-          {target.readError ? <Badge tone="critical">Read issue</Badge> : null}
+        <span className="inspector-target-indicators">
+          <MotionSourceIcon sourceKind={target.sourceKind} />
+          {target.warnings.length > 0 ? (
+            <span className="inspector-icon-token" data-tone="warning" title={warningLabel}>
+              <Icon name="warning" size={13} />
+              <span className="inspector-icon-count">{String(target.warnings.length)}</span>
+              <span className="visually-hidden">{warningLabel}</span>
+            </span>
+          ) : null}
+          {target.limitations.length > 0 ? (
+            <span className="inspector-icon-token" data-tone="partial" title={limitationLabel}>
+              <Icon name="partial" size={13} />
+              <span className="visually-hidden">{limitationLabel}</span>
+            </span>
+          ) : null}
+          {target.visible ? null : (
+            <span className="inspector-icon-token" data-tone="warning" title="Hidden layer">
+              <Icon name="hidden" size={13} />
+              <span className="visually-hidden">Hidden layer</span>
+            </span>
+          )}
+          {target.locked ? (
+            <span className="inspector-icon-token" data-tone="warning" title="Locked layer">
+              <Icon name="locked" size={13} />
+              <span className="visually-hidden">Locked layer</span>
+            </span>
+          ) : null}
+          {target.readError ? (
+            <span className="inspector-icon-token" data-tone="critical" title="Motion read issue">
+              <Icon name="read-issue" size={13} />
+              <span className="visually-hidden">Motion read issue</span>
+            </span>
+          ) : null}
         </span>
       </button>
     );
@@ -430,9 +462,7 @@ export const InspectWorkspace = ({
                 setFilters(createDefaultInspectorFilters());
               }}
               type="button"
-            >
-              Clear
-            </button>
+            ><Icon name="filter" size={13} /><span>Clear</span></button>
             <span className="inspect-filter-count">
               {String(filteredTargets.length)} of {String(targets.length)} targets
             </span>
@@ -480,11 +510,18 @@ const InspectorDetail = ({
     <article className="inspector-detail-card" aria-label={`${target.name} Motion details`}>
       <header className="inspector-detail-header">
         <div className="inspector-detail-heading">
-          <h3>{target.name}</h3>
-          {primaryBadge ? <Badge tone={primaryBadge.tone}>{primaryBadge.label}</Badge> : null}
-          <p>
-            {targetMetadataLabel(target)}
-          </p>
+          <div className="inspector-detail-title-row">
+            <FigmaNodeIcon nodeType={target.nodeType} size={15} />
+            <h3>{target.name}</h3>
+            {primaryBadge ? <Badge tone={primaryBadge.tone}>{primaryBadge.label}</Badge> : null}
+          </div>
+          <div className="inspector-detail-meta">
+            <span>{nodeTypeLabel(target.nodeType)}</span>
+            <MotionSourceIcon sourceKind={target.sourceKind} />
+            <span>{sourceKindLabel(target.sourceKind)}</span>
+            {target.visible ? null : <Icon name="hidden" size={13} />}
+            {target.locked ? <Icon name="locked" size={13} /> : null}
+          </div>
         </div>
         <button
           className="secondary-action"
@@ -493,9 +530,7 @@ const InspectorDetail = ({
             onReveal(target);
           }}
           type="button"
-        >
-          Reveal
-        </button>
+        ><Icon name="eye" size={13} /><span>Reveal</span></button>
       </header>
 
       <dl className="inspector-summary-grid">

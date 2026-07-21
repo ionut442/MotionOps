@@ -17,6 +17,7 @@ import { useApplicationStateDispatch } from "./applicationStateContext";
 import { ChangePreview, type ChangePreviewPlan } from "./components/ChangePreview";
 import { ContextDrawerShell } from "./components/ContextDrawerShell";
 import { Select } from "./components/ui";
+import { Icon } from "./components/Icon";
 
 interface EditWorkspaceProps {
   readonly activeScope: ScopeScanResult | null;
@@ -529,9 +530,7 @@ export const EditWorkspace = ({
             }}
             role="tab"
             type="button"
-          >
-            Timing
-          </button>
+          ><Icon name="timing" size={13} /><span>Timing</span></button>
           <button
             aria-selected={tab === "easing"}
             onClick={() => {
@@ -539,9 +538,7 @@ export const EditWorkspace = ({
             }}
             role="tab"
             type="button"
-          >
-            Easing
-          </button>
+          ><Icon name="easing" size={13} /><span>Easing</span></button>
           <button
             aria-selected={tab === "copy-paste"}
             onClick={() => {
@@ -549,9 +546,7 @@ export const EditWorkspace = ({
             }}
             role="tab"
             type="button"
-          >
-            Copy/Paste
-          </button>
+          ><Icon name="copy" size={13} /><span>Copy/Paste</span></button>
           <button
             aria-selected={tab === "stagger"}
             onClick={() => {
@@ -559,9 +554,7 @@ export const EditWorkspace = ({
             }}
             role="tab"
             type="button"
-          >
-            Stagger
-          </button>
+          ><Icon name="stagger" size={13} /><span>Stagger</span></button>
         </div>
       </div>
 
@@ -678,9 +671,7 @@ export const EditWorkspace = ({
               {fieldError === null ? null : <p className="edit-field-error">{fieldError}</p>}
               {planError === null ? null : <p className="edit-field-error">{planError}</p>}
               {tab === "copy-paste" || tab === "stagger" ? null : (
-                <button className="edit-primary-action" onClick={requestPlan} type="button">
-                  Build plan
-                </button>
+                <button className="edit-primary-action" onClick={requestPlan} type="button"><Icon name="sparkles" size={13} /><span>Build plan</span></button>
               )}
             </fieldset>
           </div>
@@ -898,9 +889,7 @@ const CopyPasteFields = ({
           ]}
         />
       </label>
-      <button className="edit-secondary-action" onClick={replaceClipboard} type="button">
-        Replace clipboard
-      </button>
+      <button className="edit-secondary-action" onClick={replaceClipboard} type="button"><Icon name="copy" size={13} /><span>Replace clipboard</span></button>
       <div className="edit-clipboard-summary" aria-label="Clipboard summary">
         {clipboard === null ? (
           <span>No Motion clipboard in this plugin session.</span>
@@ -978,9 +967,7 @@ const CopyPasteFields = ({
         </span>
       </label>
       {compatibilitySummary === null ? null : <p className="edit-field-note">{compatibilitySummary}</p>}
-      <button className="edit-primary-action" disabled={clipboard === null} onClick={requestPastePreview} type="button">
-        Build paste preview
-      </button>
+      <button className="edit-primary-action" disabled={clipboard === null} onClick={requestPastePreview} type="button"><Icon name="eye" size={13} /><span>Build paste preview</span></button>
     </section>
   </div>
 );
@@ -1022,9 +1009,7 @@ const StaggerFields = ({
 }) => (
   <div className="edit-copy-paste">
     <section className="edit-copy-paste-section" aria-label="Reference Motion">
-      <button className="edit-secondary-action" onClick={replaceClipboard} type="button">
-        Copy reference source
-      </button>
+      <button className="edit-secondary-action" onClick={replaceClipboard} type="button"><Icon name="copy" size={13} /><span>Copy reference source</span></button>
       <div className="edit-clipboard-summary" aria-label="Reference summary">
         {clipboard === null ? (
           <span>No reference source copied.</span>
@@ -1118,9 +1103,7 @@ const StaggerFields = ({
         <strong>Resolved order</strong>
         <span>{orderedLabels.length === 0 ? "No confirmed Scope targets." : orderedLabels.join(" -> ")}</span>
       </div>
-      <button className="edit-primary-action" disabled={clipboard === null} onClick={requestStaggerPreview} type="button">
-        Build stagger preview
-      </button>
+      <button className="edit-primary-action" disabled={clipboard === null} onClick={requestStaggerPreview} type="button"><Icon name="eye" size={13} /><span>Build stagger preview</span></button>
     </section>
   </div>
 );
