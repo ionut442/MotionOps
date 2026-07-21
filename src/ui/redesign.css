@@ -1462,6 +1462,13 @@ textarea {
   flex: 0 0 auto;
 }
 
+
+.scope-type-filters .figma-node-icon {
+  background: var(--mo-surface);
+  height: 20px;
+  width: 20px;
+}
+
 /* Inspector rows use a stable name column plus compact icon indicators. */
 
 .inspect-workspace {
