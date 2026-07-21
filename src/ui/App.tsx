@@ -26,10 +26,51 @@ import { EditWorkspace } from "./EditWorkspace";
 import { SequenceWorkspace } from "./SequenceWorkspace";
 import { ReviewWorkspace } from "./ReviewWorkspace";
 import { HelpDrawer } from "./components/HelpDrawer";
+import { Icon, type IconName } from "./components/Icon";
 import type { ScopeScanResult } from "../domain/scopeScan";
 import { useApplicationStateDispatch } from "./applicationStateContext";
 
 type ShellDensity = "wide" | "narrow";
+
+interface WorkspacePresentation {
+  readonly icon: IconName;
+  readonly navDescription: string;
+  readonly title: string;
+  readonly description: string;
+}
+
+const WORKSPACE_PRESENTATION: Record<WorkspaceId, WorkspacePresentation> = {
+  scope: {
+    icon: "layers",
+    navDescription: "Choose layers",
+    title: "Choose what to work on",
+    description: "Start with the current Figma selection, then refine it only when you need more control."
+  },
+  inspect: {
+    icon: "inspect",
+    navDescription: "Understand motion",
+    title: "Understand the motion",
+    description: "See what is animated, how it behaves, and where Motion needs attention."
+  },
+  edit: {
+    icon: "edit",
+    navDescription: "Tune & reuse",
+    title: "Adjust motion with confidence",
+    description: "Tune timing and easing, copy Motion, or create a stagger before previewing changes."
+  },
+  sequence: {
+    icon: "sequence",
+    navDescription: "Arrange timing",
+    title: "Build the sequence",
+    description: "Align, offset, distribute, and stagger animated layers on one compact timeline."
+  },
+  review: {
+    icon: "review",
+    navDescription: "QA & handoff",
+    title: "Validate and hand off",
+    description: "Run Motion QA, resolve warnings, and export a clear implementation-ready report."
+  }
+};
 
 const createRequestId = (): string =>
   `req-${Date.now().toString()}-${Math.random().toString(16).slice(2)}`;
@@ -103,9 +144,10 @@ const WorkspaceNavigation = ({
   };
 
   return (
-    <div aria-label="Workspace navigation" aria-orientation="horizontal" className="workspace-tabs" role="tablist">
-      {WORKSPACES.map((workspace) => {
+    <div aria-label="Motion workflow" aria-orientation="vertical" className="workspace-tabs" role="tablist">
+      {WORKSPACES.map((workspace, index) => {
         const isActive = workspace.id === activeWorkspace;
+        const presentation = WORKSPACE_PRESENTATION[workspace.id];
         return (
           <button
             aria-controls={getWorkspacePanelId(workspace.id)}
@@ -125,11 +167,76 @@ const WorkspaceNavigation = ({
             tabIndex={isActive ? 0 : -1}
             type="button"
           >
-            <span>{workspace.label}</span>
+            <span className="workspace-tab-icon">
+              <Icon name={presentation.icon} size={15} />
+            </span>
+            <span className="workspace-tab-copy">
+              <span className="workspace-tab-title">{workspace.label}</span>
+              <span className="workspace-tab-description">{presentation.navDescription}</span>
+            </span>
+            <span aria-hidden="true" className="workspace-tab-step">
+              {String(index + 1).padStart(2, "0")}
+            </span>
           </button>
         );
       })}
     </div>
+  );
+};
+
+const WorkspaceStageHeader = ({
+  activeWorkspace,
+  onWorkspaceChange
+}: {
+  readonly activeWorkspace: WorkspaceId;
+  readonly onWorkspaceChange: (workspace: WorkspaceId) => void;
+}) => {
+  const index = getWorkspaceIndex(activeWorkspace);
+  const presentation = WORKSPACE_PRESENTATION[activeWorkspace];
+  const previous = index > 0 ? WORKSPACES[index - 1] : null;
+  const next = index < WORKSPACES.length - 1 ? WORKSPACES[index + 1] : null;
+
+  return (
+    <header className="workspace-stage-header">
+      <span className="workspace-stage-icon">
+        <Icon name={presentation.icon} size={17} />
+      </span>
+      <span className="workspace-stage-copy">
+        <span className="workspace-stage-kicker">Step {String(index + 1)} of {String(WORKSPACES.length)}</span>
+        <h2 className="workspace-stage-title">{presentation.title}</h2>
+        <span className="workspace-stage-description">{presentation.description}</span>
+      </span>
+      <span className="workspace-stage-actions">
+        <button
+          aria-label={previous === null ? "No previous step" : `Go back to ${previous.label}`}
+          className="stage-nav-button"
+          disabled={previous === null}
+          onClick={() => {
+            if (previous !== null) {
+              onWorkspaceChange(previous.id);
+            }
+          }}
+          title={previous === null ? undefined : `Back to ${previous.label}`}
+          type="button"
+        >
+          <Icon name="chevron-left" size={15} />
+        </button>
+        <button
+          aria-label={next === null ? "No next step" : `Continue to ${next.label}`}
+          className="stage-nav-button"
+          disabled={next === null}
+          onClick={() => {
+            if (next !== null) {
+              onWorkspaceChange(next.id);
+            }
+          }}
+          title={next === null ? undefined : `Continue to ${next.label}`}
+          type="button"
+        >
+          <Icon name="chevron-right" size={15} />
+        </button>
+      </span>
+    </header>
   );
 };
 
@@ -392,13 +499,19 @@ export const App = ({ contextDrawer = null }: { contextDrawer?: ReactNode }) => 
 
       <div className="shell-body">
         <main className="shell-main" aria-label="MotionOps workspace" tabIndex={-1}>
-          <WorkspacePanel
-            activeScope={activeScope}
-            activeWorkspace={activeWorkspace}
-            lastMessage={lastMessage}
-            onActiveScopeChange={setActiveScope}
-            onContextDrawerChange={setEditContextDrawer}
-          />
+          <div className="workspace-main-shell">
+            <WorkspaceStageHeader
+              activeWorkspace={activeWorkspace}
+              onWorkspaceChange={setActiveWorkspace}
+            />
+            <WorkspacePanel
+              activeScope={activeScope}
+              activeWorkspace={activeWorkspace}
+              lastMessage={lastMessage}
+              onActiveScopeChange={setActiveScope}
+              onContextDrawerChange={setEditContextDrawer}
+            />
+          </div>
         </main>
         {activeDrawer === null ? null : <div className="shell-context">{activeDrawer}</div>}
       </div>
