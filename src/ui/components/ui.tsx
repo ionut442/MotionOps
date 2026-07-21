@@ -9,6 +9,7 @@ import {
   type ReactNode
 } from "react";
 import { createPortal } from "react-dom";
+import { Icon } from "./Icon";
 
 export interface SelectOption<TValue extends string = string> {
   readonly value: TValue;
@@ -249,7 +250,7 @@ export const Select = <TValue extends string>({
         type="button"
       >
         <span title={selectedLabel}>{selectedLabel}</span>
-        <span aria-hidden="true" className="ui-select-chevron">v</span>
+        <span aria-hidden="true" className="ui-select-chevron"><Icon name="chevron-down" size={13} /></span>
       </button>
       {open && position
         ? createPortal(
