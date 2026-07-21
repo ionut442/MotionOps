@@ -23,6 +23,20 @@
   --mo-warning-soft: #fff6e5;
   --mo-danger: #c53b45;
   --mo-danger-soft: #fff0f1;
+  --mo-node-frame: #eaf3ff;
+  --mo-node-frame-ink: #2769a8;
+  --mo-node-rectangle: #fff7d7;
+  --mo-node-rectangle-ink: #8a6811;
+  --mo-node-ellipse: #eaf8ed;
+  --mo-node-ellipse-ink: #2f7d4d;
+  --mo-node-text: #f2ecff;
+  --mo-node-text-ink: #6d4bb2;
+  --mo-node-component: #ffeaf2;
+  --mo-node-component-ink: #a64269;
+  --mo-node-group: #e8f8fb;
+  --mo-node-group-ink: #28727d;
+  --mo-node-neutral: #f0f0f2;
+  --mo-node-neutral-ink: #64646b;
   --mo-radius-xs: 5px;
   --mo-radius-sm: 7px;
   --mo-radius-md: 10px;
@@ -588,6 +602,10 @@ textarea {
   min-width: 86px;
 }
 
+.scope-field-compact {
+  min-width: 112px;
+}
+
 .scope-field > span,
 .scope-field-note,
 .edit-field-note {
@@ -656,6 +674,47 @@ textarea {
 .ui-select-option[aria-selected="true"] {
   background: var(--mo-accent-soft);
   color: var(--mo-accent);
+}
+
+.ui-multiselect-menu {
+  overflow-y: auto;
+}
+
+.ui-multiselect-clear {
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 6px !important;
+  color: var(--mo-ink-secondary) !important;
+  font-size: 10px !important;
+  font-weight: 700;
+  justify-content: flex-start;
+  min-height: 25px !important;
+  padding: 4px 7px !important;
+  width: 100%;
+}
+
+.ui-multiselect-clear:hover:not(:disabled) {
+  background: var(--mo-surface-hover) !important;
+}
+
+.ui-multiselect-option {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+  justify-content: flex-start;
+  text-align: left;
+  width: 100%;
+}
+
+.ui-multiselect-check {
+  align-items: center;
+  border: 1px solid var(--mo-line-strong);
+  border-radius: 4px;
+  color: var(--mo-accent);
+  display: inline-flex;
+  height: 14px;
+  justify-content: center;
+  width: 14px;
 }
 
 .ui-segmented-control,
@@ -728,7 +787,6 @@ textarea {
 
 .scope-mode-controls,
 .scope-toolbar,
-.scope-type-filters,
 .scope-selection-tools,
 .scope-order-note,
 .scope-state {
@@ -757,6 +815,10 @@ textarea {
   padding: 3px 6px;
 }
 
+.scope-mode-option input {
+  accent-color: var(--mo-accent);
+}
+
 .scope-mode-option:has(input:checked) {
   background: var(--mo-surface);
   box-shadow: 0 1px 3px rgb(20 20 30 / 9%);
@@ -779,17 +841,18 @@ textarea {
 .scope-tree {
   background: var(--mo-surface);
   border: 1px solid var(--mo-line);
-  border-radius: var(--mo-radius-md);
+  border-radius: 7px;
   max-height: none;
   overflow: auto;
-  padding: 3px;
+  padding: 2px 2px 46px;
 }
 
 .scope-tree-row {
   border: 0;
-  border-radius: 7px;
-  font-size: 10.5px;
-  min-height: 30px;
+  border-radius: 5px;
+  color: var(--mo-ink-secondary);
+  font-size: 11px;
+  min-height: 29px;
   padding: 2px 4px 2px calc(4px + (var(--scope-depth) * 12px));
 }
 
@@ -797,8 +860,15 @@ textarea {
   background: var(--mo-surface-hover);
 }
 
+.scope-tree-row:focus-visible {
+  background: var(--mo-accent-soft);
+  box-shadow: inset 0 0 0 1px #d8d7ff;
+  outline: 0;
+}
+
 .scope-node-name {
-  font-weight: 640;
+  color: var(--mo-ink);
+  font-weight: 500;
 }
 
 .scope-node-type {
@@ -817,6 +887,13 @@ textarea {
   width: 22px;
 }
 
+.scope-row-action {
+  height: 27px !important;
+  min-height: 27px !important;
+  padding: 0 !important;
+  width: 27px;
+}
+
 .scope-action-bar {
   background: rgb(255 255 255 / 94%);
   backdrop-filter: blur(12px);
@@ -829,6 +906,15 @@ textarea {
   left: 10px;
   padding: 6px 7px 6px 9px;
   right: 10px;
+}
+
+.scope-confirm-success,
+.scope-confirm-success:disabled {
+  background: var(--mo-success-soft) !important;
+  border-color: #bfe8d2 !important;
+  box-shadow: none;
+  color: var(--mo-success) !important;
+  opacity: 1 !important;
 }
 
 /* Inspector */
@@ -1367,6 +1453,48 @@ textarea {
 
 .figma-node-icon {
   background: var(--mo-surface-muted);
+}
+
+.figma-node-icon[data-node-type="frame"],
+.figma-node-icon[data-node-type="section"],
+.figma-node-icon[data-node-type="slice"] {
+  background: var(--mo-node-frame);
+  color: var(--mo-node-frame-ink);
+}
+
+.figma-node-icon[data-node-type="rectangle"],
+.figma-node-icon[data-node-type="rounded_rectangle"],
+.figma-node-icon[data-node-type="line"] {
+  background: var(--mo-node-rectangle);
+  color: var(--mo-node-rectangle-ink);
+}
+
+.figma-node-icon[data-node-type="ellipse"] {
+  background: var(--mo-node-ellipse);
+  color: var(--mo-node-ellipse-ink);
+}
+
+.figma-node-icon[data-node-type="text"] {
+  background: var(--mo-node-text);
+  color: var(--mo-node-text-ink);
+}
+
+.figma-node-icon[data-node-type="component"],
+.figma-node-icon[data-node-type="component_set"],
+.figma-node-icon[data-node-type="instance"] {
+  background: var(--mo-node-component);
+  color: var(--mo-node-component-ink);
+}
+
+.figma-node-icon[data-node-type="group"] {
+  background: var(--mo-node-group);
+  color: var(--mo-node-group-ink);
+}
+
+.figma-node-icon[data-node-type="vector"],
+.figma-node-icon[data-node-type="shape"] {
+  background: var(--mo-node-neutral);
+  color: var(--mo-node-neutral-ink);
 }
 
 .scope-state-icon,

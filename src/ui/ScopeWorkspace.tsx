@@ -31,7 +31,7 @@ import {
 } from "../domain/scopeOrdering";
 import type { ScopeScanNode, ScopeScanResult } from "../domain/scopeScan";
 import type { PluginToUiMessage, UiToPluginMessage } from "../shared/messages";
-import { Select } from "./components/ui";
+import { MultiSelect, Select } from "./components/ui";
 import { Icon } from "./components/Icon";
 import { FigmaNodeIcon } from "./components/FigmaNodeIcon";
 
@@ -121,6 +121,9 @@ const idsSignature = (ids: ReadonlySet<string>): string => [...ids].sort((left, 
 
 const scopeSignature = (result: ScopeScanResult | null): string =>
   result === null ? "" : idsSignature(new Set(result.nodes.map((node) => node.id)));
+
+const scopeDefinitionNodeIds = (ids: ReadonlySet<string>): readonly string[] =>
+  [...ids].sort((left, right) => left.localeCompare(right));
 
 const descendantIds = (
   nodeId: string,
@@ -264,7 +267,7 @@ export const ScopeWorkspace = ({
           : { status: "ready", result: lastMessage.result }
       );
       setExpandedIds(new Set(lastMessage.result.roots));
-      setCheckedIds(new Set(lastMessage.result.nodes.map((node) => node.id)));
+      setCheckedIds(new Set(checkedIdsForManualScan(lastMessage.result)));
       setCustomNodeIds((current) =>
         normalizeCustomOrder(current, lastMessage.result.nodes.map((node) => node.id))
       );
@@ -336,6 +339,10 @@ export const ScopeWorkspace = ({
     () => childLookup(filteredResult?.nodes ?? []),
     [filteredResult]
   );
+  const allChildrenByParent = useMemo(
+    () => childLookup(orderedResult?.nodes ?? []),
+    [orderedResult]
+  );
   const roots = useMemo(
     () => (filteredResult === null ? [] : visibleRoots(filteredResult)),
     [filteredResult]
@@ -348,11 +355,29 @@ export const ScopeWorkspace = ({
     [result]
   );
   const draftScopeResult = useMemo<ScopeScanResult | null>(
-    () => (filteredResult === null ? null : buildScopeResult(filteredResult, checkedIds)),
-    [checkedIds, filteredResult]
+    () => (orderedResult === null ? null : buildScopeResult(orderedResult, checkedIds)),
+    [checkedIds, orderedResult]
   );
   const draftSignature = scopeSignature(draftScopeResult);
   const hasPendingChanges = draftSignature !== lastConfirmedSignature;
+  const isConfirmedCurrent =
+    confirmedScope !== null && draftScopeResult !== null && !hasPendingChanges;
+  const canConfirm =
+    draftScopeResult !== null && draftScopeResult.nodes.length > 0 && hasPendingChanges;
+  const visibleCheckedCount = filteredResult?.nodes.filter((node) => checkedIds.has(node.id)).length ?? 0;
+  const typeFilterLabel =
+    filters.nodeTypes.length === 0
+      ? "All types"
+      : filters.nodeTypes.length === 1
+        ? nodeTypeLabel(filters.nodeTypes[0] ?? "")
+        : `Types: ${String(filters.nodeTypes.length)}`;
+
+  const applyCheckedIds = (nextIds: ReadonlySet<string>) => {
+    const next = new Set(nextIds);
+    setCheckedIds(next);
+    setScopeDefinition({ mode: "manual", nodeIds: scopeDefinitionNodeIds(next) });
+    setModeError(null);
+  };
 
   const toggleExpanded = (nodeId: string) => {
     setExpandedIds((current) => {
@@ -368,21 +393,19 @@ export const ScopeWorkspace = ({
 
   const setBranchChecked = (nodeId: string, checked: boolean) => {
     const branchIds = descendantIds(nodeId, childrenByParent);
-    setCheckedIds((current) => {
-      const next = new Set(current);
-      for (const id of branchIds) {
-        if (checked) {
-          next.add(id);
-        } else {
-          next.delete(id);
-        }
+    const next = new Set(checkedIds);
+    for (const id of branchIds) {
+      if (checked) {
+        next.add(id);
+      } else {
+        next.delete(id);
       }
-      return next;
-    });
+    }
+    applyCheckedIds(next);
   };
 
   const checkboxState = (node: ScopeScanNode): "checked" | "unchecked" | "mixed" => {
-    const ids = descendantIds(node.id, childrenByParent);
+    const ids = descendantIds(node.id, allChildrenByParent);
     const selectedCount = ids.filter((id) => checkedIds.has(id)).length;
     if (selectedCount === 0) {
       return "unchecked";
@@ -391,6 +414,37 @@ export const ScopeWorkspace = ({
       return "checked";
     }
     return "mixed";
+  };
+
+  const selectAllVisible = () => {
+    if (filteredResult === null) {
+      return;
+    }
+    const next = new Set(checkedIds);
+    for (const node of filteredResult.nodes) {
+      next.add(node.id);
+    }
+    applyCheckedIds(next);
+  };
+
+  const deselectAllVisible = () => {
+    if (filteredResult === null) {
+      return;
+    }
+    const next = new Set(checkedIds);
+    for (const node of filteredResult.nodes) {
+      next.delete(node.id);
+    }
+    applyCheckedIds(next);
+  };
+
+  const checkedIdsForManualScan = (scanResult: ScopeScanResult): readonly string[] => {
+    const currentDefinition = scopeDefinitionRef.current;
+    if (currentDefinition.mode !== "manual") {
+      return scanResult.nodes.map((node) => node.id);
+    }
+    const scannedIds = new Set(scanResult.nodes.map((node) => node.id));
+    return currentDefinition.nodeIds.filter((nodeId) => scannedIds.has(nodeId));
   };
 
   const changeOrderMode = (mode: ScopeOrderMode) => {
@@ -465,7 +519,12 @@ export const ScopeWorkspace = ({
     }
 
     if (mode === "manual") {
-      commitScopeDefinition({ mode: "manual", nodeIds: [] });
+      const manualIds = scopeDefinitionNodeIds(checkedIds);
+      setScopeDefinition({ mode: "manual", nodeIds: manualIds });
+      setModeError(null);
+      if (result === null) {
+        requestScan({ mode: "manual", nodeIds: manualIds });
+      }
       return;
     }
 
@@ -491,16 +550,8 @@ export const ScopeWorkspace = ({
     setFilters((current) => ({ ...current, ...next }));
   };
 
-  const toggleNodeTypeFilter = (type: string) => {
-    setFilters((current) => {
-      const selected = new Set(current.nodeTypes);
-      if (selected.has(type)) {
-        selected.delete(type);
-      } else {
-        selected.add(type);
-      }
-      return { ...current, nodeTypes: [...selected].sort((left, right) => left.localeCompare(right)) };
-    });
+  const setNodeTypeFilters = (types: readonly string[]) => {
+    setFilters((current) => ({ ...current, nodeTypes: [...types].sort((left, right) => left.localeCompare(right)) }));
   };
 
   const confirmScope = () => {
@@ -511,10 +562,10 @@ export const ScopeWorkspace = ({
 
   const resetDraft = () => {
     if (confirmedScope === null) {
-      setCheckedIds(new Set());
+      applyCheckedIds(new Set());
       return;
     }
-    setCheckedIds(new Set(confirmedScope.nodes.map((node) => node.id)));
+    applyCheckedIds(new Set(confirmedScope.nodes.map((node) => node.id)));
   };
 
   const renderRows = (nodes: readonly ScopeScanNode[]): ReactElement[] =>
@@ -595,8 +646,8 @@ export const ScopeWorkspace = ({
               type="button"
             ><Icon name="sequence" size={12} /></button>
           ) : null}
-          <span className="scope-node-name">{node.name}</span>
           <FigmaNodeIcon nodeType={node.type} />
+          <span className="scope-node-name" title={node.name}>{node.name}</span>
           {node.visible ? null : (
             <span className="scope-state-icon" title="Hidden layer">
               <Icon name="hidden" size={13} />
@@ -615,8 +666,9 @@ export const ScopeWorkspace = ({
             onClick={() => {
               revealNode(node.id);
             }}
+            title="Reveal in Figma"
             type="button"
-          ><Icon name="eye" size={13} /><span>Reveal</span></button>
+          ><Icon name="eye" size={13} /><span className="visually-hidden">Reveal in Figma</span></button>
           {order.mode === "custom" ? (
             <>
               <button
@@ -655,7 +707,6 @@ export const ScopeWorkspace = ({
           <p>Define the target set MotionOps should use in the other workspaces.</p>
         </div>
         <div className="scope-summary" aria-label="Scope target summary">
-          <span>{String(draftScopeResult?.nodes.length ?? 0)} included</span>
           <span>{ORDER_LABELS[order.mode]}</span>
           <span>{SCOPE_MODE_OPTIONS.find((option) => option.mode === scopeDefinition.mode)?.label}</span>
         </div>
@@ -711,6 +762,17 @@ export const ScopeWorkspace = ({
             value={filters.search}
           />
         </label>
+        <label className="scope-field scope-field-compact">
+          <span>Types</span>
+          <MultiSelect
+            clearLabel="Show all"
+            label="Node type filters"
+            onChange={setNodeTypeFilters}
+            options={nodeTypes.map((type) => ({ value: type, label: nodeTypeLabel(type) }))}
+            triggerLabel={typeFilterLabel}
+            values={filters.nodeTypes}
+          />
+        </label>
         <label className="scope-check-option">
           <input
             checked={filters.visibleOnly}
@@ -761,24 +823,6 @@ export const ScopeWorkspace = ({
           type="button"
         ><Icon name="refresh" size={13} /><span>Refresh</span></button>
       </div>
-
-      {nodeTypes.length > 0 ? (
-        <div className="scope-type-filters" aria-label="Node type filters">
-          {nodeTypes.map((type) => (
-            <label className="scope-check-option" key={type}>
-              <input
-                checked={filters.nodeTypes.includes(type)}
-                onChange={() => {
-                  toggleNodeTypeFilter(type);
-                }}
-                type="checkbox"
-              />
-              <FigmaNodeIcon nodeType={type} size={12} />
-              <span>{nodeTypeLabel(type)}</span>
-            </label>
-          ))}
-        </div>
-      ) : null}
 
       {order.mode === "custom" ? (
         <div className="scope-order-note">
@@ -846,16 +890,16 @@ export const ScopeWorkspace = ({
       {filteredResult !== null && filteredResult.nodes.length > 0 ? (
         <>
           <div className="scope-selection-tools">
-            <span>{String(draftScopeResult?.nodes.length ?? 0)} of {String(filteredResult.nodes.length)} targets included</span>
+            <span>{String(draftScopeResult?.nodes.length ?? 0)} included / {String(visibleCheckedCount)} of {String(filteredResult.nodes.length)} visible</span>
             <button
               onClick={() => {
-                setCheckedIds(new Set(filteredResult.nodes.map((node) => node.id)));
+                selectAllVisible();
               }}
               type="button"
             ><Icon name="check" size={13} /><span>Select all</span></button>
             <button
               onClick={() => {
-                setCheckedIds(new Set());
+                deselectAllVisible();
               }}
               type="button"
             ><Icon name="minus" size={13} /><span>Deselect all</span></button>
@@ -868,14 +912,21 @@ export const ScopeWorkspace = ({
 
       <div className="scope-action-bar">
         <span>
-          {hasPendingChanges
+          {draftScopeResult === null || draftScopeResult.nodes.length === 0
+            ? "Include at least one layer to confirm Scope."
+            : hasPendingChanges
             ? "Scope draft has pending changes."
             : confirmedScope === null
               ? "Confirm a Scope to share it with the other workspaces."
               : "Confirmed Scope is up to date."}
         </span>
         <button className="secondary-action" disabled={!hasPendingChanges} onClick={resetDraft} type="button"><Icon name="undo" size={13} /><span>Reset</span></button>
-        <button className="primary-action" disabled={draftScopeResult === null} onClick={confirmScope} type="button"><Icon name="check" size={13} /><span>Confirm scope</span></button>
+        <button
+          className={isConfirmedCurrent ? "primary-action scope-confirm-success" : "primary-action"}
+          disabled={!canConfirm}
+          onClick={confirmScope}
+          type="button"
+        ><Icon name="check" size={13} /><span>{isConfirmedCurrent ? "Scope confirmed" : confirmedScope === null ? "Confirm scope" : "Confirm changes"}</span></button>
       </div>
     </section>
   );

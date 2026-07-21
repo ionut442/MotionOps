@@ -29,7 +29,7 @@ describe("UI responsive contracts", () => {
     expect(redesignCss).toContain(".primary-action:disabled");
     expect(redesignCss).toContain("background: #ececf0 !important");
     expect(redesignCss).toContain(".scope-action-bar > button > span");
-    expect(scopeSource).toContain('disabled={draftScopeResult === null}');
+    expect(scopeSource).toContain("disabled={!canConfirm}");
   });
 
   it("stretches every workspace panel to the content column", () => {

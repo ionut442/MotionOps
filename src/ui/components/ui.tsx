@@ -26,6 +26,17 @@ interface SelectProps<TValue extends string> {
   readonly className?: string;
 }
 
+interface MultiSelectProps<TValue extends string> {
+  readonly label: string;
+  readonly triggerLabel: string;
+  readonly values: readonly TValue[];
+  readonly options: readonly SelectOption<TValue>[];
+  readonly onChange: (values: readonly TValue[]) => void;
+  readonly clearLabel?: string;
+  readonly disabled?: boolean;
+  readonly className?: string;
+}
+
 interface OverlayPosition {
   readonly top: number;
   readonly left: number;
@@ -285,6 +296,246 @@ export const Select = <TValue extends string>({
                   title={option.label}
                   type="button"
                 >
+                  <span>{option.label}</span>
+                </button>
+              ))}
+            </div>,
+            document.body
+          )
+        : null}
+    </>
+  );
+};
+
+export const MultiSelect = <TValue extends string>({
+  label,
+  triggerLabel,
+  values,
+  options,
+  onChange,
+  clearLabel = "Clear",
+  disabled = false,
+  className
+}: MultiSelectProps<TValue>) => {
+  const id = useId();
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const [open, setOpen] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(0);
+  const [position, setPosition] = useState<OverlayPosition | null>(null);
+  const selected = useMemo(() => new Set<TValue>(values), [values]);
+  const enabledOptions = useMemo(
+    () => options.map((option, index) => ({ option, index })).filter((entry) => !entry.option.disabled),
+    [options]
+  );
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    const close = (event: PointerEvent) => {
+      const target = event.target;
+      if (
+        target instanceof Node &&
+        (triggerRef.current?.contains(target) || menuRef.current?.contains(target))
+      ) {
+        return;
+      }
+      setOpen(false);
+      triggerRef.current?.focus();
+    };
+
+    window.addEventListener("pointerdown", close);
+    return () => {
+      window.removeEventListener("pointerdown", close);
+    };
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    const updatePosition = () => {
+      const rect = triggerRef.current?.getBoundingClientRect();
+      if (!rect) {
+        return;
+      }
+
+      const viewportWidth = Math.max(document.documentElement.clientWidth, window.innerWidth || 0);
+      const viewportHeight = Math.max(document.documentElement.clientHeight, window.innerHeight || 0);
+      const preferredWidth = Math.min(Math.max(rect.width, 188), viewportWidth - MENU_MARGIN * 2);
+      const left = Math.min(Math.max(MENU_MARGIN, rect.left), viewportWidth - preferredWidth - MENU_MARGIN);
+      const belowSpace = viewportHeight - rect.bottom - MENU_MARGIN;
+      const aboveSpace = rect.top - MENU_MARGIN;
+      const openAbove = belowSpace < 180 && aboveSpace > belowSpace;
+      const maxHeight = Math.max(112, Math.min(DEFAULT_MENU_HEIGHT, openAbove ? aboveSpace : belowSpace));
+      const top = openAbove ? Math.max(MENU_MARGIN, rect.top - maxHeight - 4) : rect.bottom + 4;
+      setPosition({ top, left, width: preferredWidth, maxHeight });
+    };
+
+    updatePosition();
+    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", updatePosition, true);
+    return () => {
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition, true);
+    };
+  }, [open]);
+
+  useLayoutEffect(() => {
+    if (!open) {
+      return;
+    }
+    requestAnimationFrame(() => {
+      document.getElementById(`${id}-option-${String(activeIndex)}`)?.scrollIntoView({ block: "nearest" });
+    });
+  }, [activeIndex, id, open]);
+
+  const moveActive = (direction: 1 | -1) => {
+    if (enabledOptions.length === 0) {
+      return;
+    }
+    const currentEnabledIndex = enabledOptions.findIndex((entry) => entry.index === activeIndex);
+    const nextEnabledIndex =
+      currentEnabledIndex < 0
+        ? 0
+        : (currentEnabledIndex + direction + enabledOptions.length) % enabledOptions.length;
+    setActiveIndex(enabledOptions[nextEnabledIndex]?.index ?? 0);
+  };
+
+  const toggleValue = (value: TValue) => {
+    const next = new Set(selected);
+    if (next.has(value)) {
+      next.delete(value);
+    } else {
+      next.add(value);
+    }
+    onChange(options.map((option) => option.value).filter((optionValue) => next.has(optionValue)));
+  };
+
+  const handleKeyDown = (event: KeyboardEvent<HTMLButtonElement | HTMLDivElement>) => {
+    if (disabled) {
+      return;
+    }
+
+    switch (event.key) {
+      case "ArrowDown":
+        event.preventDefault();
+        if (!open) {
+          setOpen(true);
+        } else {
+          moveActive(1);
+        }
+        break;
+      case "ArrowUp":
+        event.preventDefault();
+        if (!open) {
+          setOpen(true);
+        } else {
+          moveActive(-1);
+        }
+        break;
+      case "Home":
+        event.preventDefault();
+        setActiveIndex(enabledOptions[0]?.index ?? 0);
+        break;
+      case "End":
+        event.preventDefault();
+        setActiveIndex(enabledOptions.at(-1)?.index ?? 0);
+        break;
+      case "Enter":
+      case " ":
+        event.preventDefault();
+        if (!open) {
+          setOpen(true);
+        } else {
+          const option = options[activeIndex];
+          if (!option.disabled) {
+            toggleValue(option.value);
+          }
+        }
+        break;
+      case "Escape":
+        event.preventDefault();
+        setOpen(false);
+        triggerRef.current?.focus();
+        break;
+    }
+  };
+
+  return (
+    <>
+      <button
+        aria-activedescendant={open ? `${id}-option-${String(activeIndex)}` : undefined}
+        aria-controls={`${id}-menu`}
+        aria-disabled={disabled}
+        aria-expanded={open}
+        aria-haspopup="listbox"
+        aria-label={label}
+        className={["ui-select-trigger ui-multiselect-trigger", className].filter(Boolean).join(" ")}
+        data-open={open}
+        disabled={disabled}
+        id={`${id}-trigger`}
+        onClick={() => {
+          setOpen((current) => !current);
+        }}
+        onKeyDown={handleKeyDown}
+        ref={triggerRef}
+        role="combobox"
+        type="button"
+      >
+        <span title={triggerLabel}>{triggerLabel}</span>
+        <span aria-hidden="true" className="ui-select-chevron"><Icon name="chevron-down" size={13} /></span>
+      </button>
+      {open && position
+        ? createPortal(
+            <div
+              aria-label={label}
+              aria-multiselectable="true"
+              className="ui-select-menu ui-multiselect-menu"
+              id={`${id}-menu`}
+              onKeyDown={handleKeyDown}
+              ref={menuRef}
+              role="listbox"
+              style={{
+                left: `${String(position.left)}px`,
+                maxHeight: `${String(position.maxHeight)}px`,
+                top: `${String(position.top)}px`,
+                width: `${String(position.width)}px`
+              }}
+              tabIndex={-1}
+            >
+              <button
+                className="ui-multiselect-clear"
+                disabled={values.length === 0}
+                onClick={() => {
+                  onChange([]);
+                }}
+                type="button"
+              >
+                {clearLabel}
+              </button>
+              {options.map((option, index) => (
+                <button
+                  aria-disabled={option.disabled}
+                  aria-selected={selected.has(option.value)}
+                  className="ui-select-option ui-multiselect-option"
+                  data-active={index === activeIndex}
+                  disabled={option.disabled}
+                  id={`${id}-option-${String(index)}`}
+                  key={option.value}
+                  onClick={() => {
+                    toggleValue(option.value);
+                  }}
+                  role="option"
+                  title={option.label}
+                  type="button"
+                >
+                  <span aria-hidden="true" className="ui-multiselect-check">
+                    {selected.has(option.value) ? <Icon name="check" size={11} /> : null}
+                  </span>
                   <span>{option.label}</span>
                 </button>
               ))}
