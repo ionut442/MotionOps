@@ -247,14 +247,19 @@ test("Inspect panel stays aligned and overflow-free across responsive widths", a
     const rowContracts = await page.locator(".inspector-target-row").evaluateAll((rows) =>
       rows.every((row) => {
         const name = row.querySelector<HTMLElement>(".inspector-target-name");
+        const main = row.querySelector<HTMLElement>(".inspector-target-main");
         const indicators = row.querySelector<HTMLElement>(".inspector-target-indicators");
-        if (!name || !indicators) return false;
+        if (!name || !main || !indicators) return false;
+        const rowStyle = window.getComputedStyle(row);
         const nameStyle = window.getComputedStyle(name);
+        const mainStyle = window.getComputedStyle(main);
         const indicatorStyle = window.getComputedStyle(indicators);
         return (
+          rowStyle.justifyContent === "flex-start" &&
           Number.parseFloat(nameStyle.fontSize) <= 12 &&
           Number.parseInt(nameStyle.fontWeight, 10) <= 500 &&
           nameStyle.textAlign === "left" &&
+          mainStyle.flexGrow === "1" &&
           nameStyle.textOverflow === "ellipsis" &&
           indicatorStyle.flexShrink === "0"
         );

@@ -1864,14 +1864,18 @@ textarea {
 
 .inspect-workspace .inspector-target-row {
   --inspector-target-row-bg: var(--mo-surface);
+  align-items: center;
   background: var(--inspector-target-row-bg);
   border: 1px solid transparent;
   border-radius: 5px;
   display: flex !important;
+  gap: 6px;
+  justify-content: flex-start !important;
   min-height: 30px;
   overflow: hidden;
   padding: 3px 6px 3px calc(7px + var(--scope-depth, 0) * 11px);
   position: relative;
+  text-align: left;
 }
 
 .inspect-workspace .inspector-target-row:hover {
@@ -1923,10 +1927,11 @@ textarea {
   min-width: 0;
 }
 
-.inspector-target-main {
+.shell-main .inspect-workspace .inspector-target-row > .inspector-target-main {
   flex: 1 1 0%;
   max-width: calc(100% - 50px);
   overflow: hidden;
+  text-align: left;
   width: auto;
 }
 
@@ -1952,7 +1957,7 @@ textarea {
   width: 20px;
 }
 
-.inspector-target-indicators {
+.shell-main .inspect-workspace .inspector-target-row > .inspector-target-indicators {
   --inspector-action-solid-width: 44px;
   --inspector-action-fade-width: 16px;
   flex: 0 0 44px;
