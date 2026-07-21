@@ -11,7 +11,7 @@ import type {
   NormalizedTimeline
 } from "./motion";
 
-export type InspectorMode = "compact" | "detailed" | "debug";
+export type InspectorMode = "overview" | "details" | "debug";
 export type InspectorWarningLevel = "info" | "warning";
 export type InspectorDiagnosticCategory = "warning" | "limitation" | "information" | "debug";
 export type InspectorAnimationState = "all" | "animated" | "no-motion";

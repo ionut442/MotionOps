@@ -1,4 +1,5 @@
 import {
+  useCallback,
   useEffect,
   useId,
   useLayoutEffect,
@@ -44,8 +45,17 @@ interface OverlayPosition {
   readonly maxHeight: number;
 }
 
+type TooltipPlacement = "top" | "bottom" | "left" | "right";
+
+interface TooltipPosition {
+  readonly top: number;
+  readonly left: number;
+}
+
 const MENU_MARGIN = 8;
 const DEFAULT_MENU_HEIGHT = 232;
+const TOOLTIP_GAP = 7;
+const TOOLTIP_MARGIN = 6;
 
 const optionText = <TValue extends string>(options: readonly SelectOption<TValue>[], value: TValue): string =>
   options.find((option) => option.value === value)?.label ?? "";
@@ -260,7 +270,7 @@ export const Select = <TValue extends string>({
         role="combobox"
         type="button"
       >
-        <span title={selectedLabel}>{selectedLabel}</span>
+        <span>{selectedLabel}</span>
         <span aria-hidden="true" className="ui-select-chevron"><Icon name="chevron-down" size={13} /></span>
       </button>
       {open && position
@@ -293,7 +303,6 @@ export const Select = <TValue extends string>({
                     selectIndex(index);
                   }}
                   role="option"
-                  title={option.label}
                   type="button"
                 >
                   <span>{option.label}</span>
@@ -486,7 +495,7 @@ export const MultiSelect = <TValue extends string>({
         role="combobox"
         type="button"
       >
-        <span title={triggerLabel}>{triggerLabel}</span>
+        <span>{triggerLabel}</span>
         <span aria-hidden="true" className="ui-select-chevron"><Icon name="chevron-down" size={13} /></span>
       </button>
       {open && position
@@ -530,7 +539,6 @@ export const MultiSelect = <TValue extends string>({
                     toggleValue(option.value);
                   }}
                   role="option"
-                  title={option.label}
                   type="button"
                 >
                   <span aria-hidden="true" className="ui-multiselect-check">
@@ -596,3 +604,171 @@ export const EmptyState = ({ title, children }: { readonly title: string; readon
     {children ? <p>{children}</p> : null}
   </div>
 );
+
+export const Tooltip = ({
+  children,
+  content,
+  placement = "top",
+  delayMs = 350,
+  disabled = false,
+  shouldOpen
+}: {
+  readonly children: ReactNode;
+  readonly content: ReactNode;
+  readonly placement?: TooltipPlacement;
+  readonly delayMs?: number;
+  readonly disabled?: boolean;
+  readonly shouldOpen?: () => boolean;
+}) => {
+  const id = useId();
+  const anchorRef = useRef<HTMLSpanElement | null>(null);
+  const tooltipRef = useRef<HTMLDivElement | null>(null);
+  const timerRef = useRef<number | null>(null);
+  const [open, setOpen] = useState(false);
+  const [position, setPosition] = useState<TooltipPosition | null>(null);
+
+  const clearTimer = useCallback(() => {
+    if (timerRef.current !== null) {
+      window.clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+  }, []);
+
+  const close = useCallback(() => {
+    clearTimer();
+    setOpen(false);
+  }, [clearTimer]);
+
+  const scheduleOpen = () => {
+    if (disabled || shouldOpen?.() === false) {
+      return;
+    }
+    clearTimer();
+    timerRef.current = window.setTimeout(() => {
+      setOpen(true);
+    }, delayMs);
+  };
+
+  useEffect(
+    () => () => {
+      clearTimer();
+    },
+    [clearTimer]
+  );
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    const handleKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") {
+        close();
+      }
+    };
+    const handleScroll = () => {
+      close();
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("scroll", handleScroll, true);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("scroll", handleScroll, true);
+    };
+  }, [close, open]);
+
+  useLayoutEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    const updatePosition = () => {
+      const anchor = anchorRef.current?.getBoundingClientRect();
+      const tooltip = tooltipRef.current?.getBoundingClientRect();
+      if (!anchor || !tooltip) {
+        return;
+      }
+
+      const viewportWidth = Math.max(document.documentElement.clientWidth, window.innerWidth || 0);
+      const viewportHeight = Math.max(document.documentElement.clientHeight, window.innerHeight || 0);
+      const candidates: Record<TooltipPlacement, TooltipPosition> = {
+        top: {
+          top: anchor.top - tooltip.height - TOOLTIP_GAP,
+          left: anchor.left + anchor.width / 2 - tooltip.width / 2
+        },
+        bottom: {
+          top: anchor.bottom + TOOLTIP_GAP,
+          left: anchor.left + anchor.width / 2 - tooltip.width / 2
+        },
+        left: {
+          top: anchor.top + anchor.height / 2 - tooltip.height / 2,
+          left: anchor.left - tooltip.width - TOOLTIP_GAP
+        },
+        right: {
+          top: anchor.top + anchor.height / 2 - tooltip.height / 2,
+          left: anchor.right + TOOLTIP_GAP
+        }
+      };
+      const order: readonly TooltipPlacement[] =
+        placement === "top"
+          ? ["top", "bottom", "right", "left"]
+          : placement === "bottom"
+            ? ["bottom", "top", "right", "left"]
+            : placement === "left"
+              ? ["left", "right", "top", "bottom"]
+              : ["right", "left", "top", "bottom"];
+      const fits = (candidate: TooltipPosition) =>
+        candidate.left >= TOOLTIP_MARGIN &&
+        candidate.top >= TOOLTIP_MARGIN &&
+        candidate.left + tooltip.width <= viewportWidth - TOOLTIP_MARGIN &&
+        candidate.top + tooltip.height <= viewportHeight - TOOLTIP_MARGIN;
+      const preferred = order.map((candidate) => candidates[candidate]).find(fits) ?? candidates[placement];
+      setPosition({
+        top: Math.min(Math.max(TOOLTIP_MARGIN, preferred.top), viewportHeight - tooltip.height - TOOLTIP_MARGIN),
+        left: Math.min(Math.max(TOOLTIP_MARGIN, preferred.left), viewportWidth - tooltip.width - TOOLTIP_MARGIN)
+      });
+    };
+
+    updatePosition();
+    window.addEventListener("resize", updatePosition);
+    return () => {
+      window.removeEventListener("resize", updatePosition);
+    };
+  }, [open, placement]);
+
+  return (
+    <>
+      <span
+        aria-describedby={open ? id : undefined}
+        className="ui-tooltip-anchor"
+        onBlur={close}
+        onFocus={scheduleOpen}
+        onMouseEnter={scheduleOpen}
+        onMouseLeave={close}
+        onPointerEnter={scheduleOpen}
+        onPointerLeave={close}
+        ref={anchorRef}
+      >
+        {children}
+      </span>
+      {open
+        ? createPortal(
+            <div
+              className="ui-tooltip"
+              id={id}
+              ref={tooltipRef}
+              role="tooltip"
+              style={{
+                left: `${String(position?.left ?? -9999)}px`,
+                top: `${String(position?.top ?? -9999)}px`
+              }}
+            >
+              {content}
+            </div>,
+            document.body
+          )
+        : null}
+    </>
+  );
+};

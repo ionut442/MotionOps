@@ -1476,7 +1476,7 @@ h1 {
   margin: 0;
 }
 
-.inspector-summary-grid div {
+.inspector-summary-grid > div {
   background: var(--color-surface-subtle);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
