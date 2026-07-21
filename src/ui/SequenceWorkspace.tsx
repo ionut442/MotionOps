@@ -26,6 +26,7 @@ import { useApplicationStateDispatch } from "./applicationStateContext";
 import { ChangePreview, type ChangePreviewPlan } from "./components/ChangePreview";
 import { ContextDrawerShell } from "./components/ContextDrawerShell";
 import { Select } from "./components/ui";
+import { Icon } from "./components/Icon";
 
 interface SequenceWorkspaceProps {
   readonly activeScope: ScopeScanResult | null;
@@ -289,7 +290,7 @@ export const SequenceWorkspace = ({
           <h2>Sequence</h2>
           <p>{activeScope === null ? "No confirmed Scope is available." : `${String(activeScope.nodes.length)} scoped target(s) available.`}</p>
         </div>
-        <button disabled={readState.status !== "ready"} onClick={() => { rebuildDraft(snapshots); }} type="button">Rebuild draft</button>
+        <button disabled={readState.status !== "ready"} onClick={() => { rebuildDraft(snapshots); }} type="button"><Icon name="refresh" size={13} /><span>Rebuild draft</span></button>
       </div>
 
       {readState.status === "idle" ? <div className="scope-state">Confirm a Scope before sequencing Motion.</div> : null}
@@ -323,12 +324,12 @@ export const SequenceWorkspace = ({
             <button onClick={() => { setDraft({ ...draft, snap: { enabled: !draft.snap.enabled, intervalMs: (integerOrNull(snapIntervalMs) ?? 50) as never } }); }} type="button">
               Snap {draft.snap.enabled ? "on" : "off"}
             </button>
-            <button onClick={() => { mutateByDelta((current, value) => offsetSelection(current, value as never)); }} type="button">Nudge forward</button>
-            <button onClick={() => { mutateByDelta((current, value) => offsetSelection(current, -value as never)); }} type="button">Nudge back</button>
-            <button onClick={() => { mutateByDelta((current, value) => resizeSelection(current, "end", value as never)); }} type="button">Resize end</button>
-            <button onClick={() => { setDraft(alignSelection(draft, "start", { kind: "earliest" })); }} type="button">Align starts</button>
-            <button onClick={() => { setDraft(alignSelection(draft, "end", { kind: "latest" })); }} type="button">Align ends</button>
-            <button onClick={() => { setDraft(distributeSelection(draft, "starts")); }} type="button">Distribute</button>
+            <button onClick={() => { mutateByDelta((current, value) => offsetSelection(current, value as never)); }} type="button"><Icon name="chevron-right" size={13} /><span>Nudge forward</span></button>
+            <button onClick={() => { mutateByDelta((current, value) => offsetSelection(current, -value as never)); }} type="button"><Icon name="chevron-left" size={13} /><span>Nudge back</span></button>
+            <button onClick={() => { mutateByDelta((current, value) => resizeSelection(current, "end", value as never)); }} type="button"><Icon name="edit" size={13} /><span>Resize end</span></button>
+            <button onClick={() => { setDraft(alignSelection(draft, "start", { kind: "earliest" })); }} type="button"><Icon name="sequence" size={13} /><span>Align starts</span></button>
+            <button onClick={() => { setDraft(alignSelection(draft, "end", { kind: "latest" })); }} type="button"><Icon name="sequence" size={13} /><span>Align ends</span></button>
+            <button onClick={() => { setDraft(distributeSelection(draft, "starts")); }} type="button"><Icon name="stagger" size={13} /><span>Distribute</span></button>
             <label className="scope-field">
               <span>Stagger mode</span>
               <Select
@@ -373,15 +374,15 @@ export const SequenceWorkspace = ({
                 value={staggerAnchor}
               />
             </label>
-            <button onClick={applyStaggerToDraft} type="button">Stagger</button>
+            <button onClick={applyStaggerToDraft} type="button"><Icon name="stagger" size={13} /><span>Stagger</span></button>
             <label className="scope-field">
               <span>Fit (ms)</span>
               <input inputMode="numeric" value={fitDurationMs} onChange={(event) => { setFitDurationMs(event.currentTarget.value); }} />
             </label>
-            <button onClick={() => { setDraft(fitSelectionToDuration(draft, (integerOrNull(fitDurationMs) ?? 1000) as never, "scale-all")); }} type="button">Fit</button>
-            <button onClick={() => { setDraft(trimAndPadTimeline(draft, { trimStart: true, trimEnd: true, paddingEndMs: 100 as never })); }} type="button">Trim/pad</button>
-            <button onClick={() => { setDraft(resetSequencerDraft(draft, snapshots.filter((snapshot) => snapshot.nodeId === selectedNodeId))); }} type="button">Reset draft</button>
-            <button onClick={buildPreview} type="button">Build preview</button>
+            <button onClick={() => { setDraft(fitSelectionToDuration(draft, (integerOrNull(fitDurationMs) ?? 1000) as never, "scale-all")); }} type="button"><Icon name="timing" size={13} /><span>Fit</span></button>
+            <button onClick={() => { setDraft(trimAndPadTimeline(draft, { trimStart: true, trimEnd: true, paddingEndMs: 100 as never })); }} type="button"><Icon name="edit" size={13} /><span>Trim/pad</span></button>
+            <button onClick={() => { setDraft(resetSequencerDraft(draft, snapshots.filter((snapshot) => snapshot.nodeId === selectedNodeId))); }} type="button"><Icon name="undo" size={13} /><span>Reset draft</span></button>
+            <button onClick={buildPreview} type="button"><Icon name="eye" size={13} /><span>Build preview</span></button>
           </div>
 
           {propertyError === null ? null : <p className="edit-field-error">{propertyError}</p>}
