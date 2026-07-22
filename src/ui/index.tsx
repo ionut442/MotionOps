@@ -4,6 +4,7 @@ import { App } from "./App";
 import { ApplicationStateProvider } from "./ApplicationStateProvider";
 import "./styles.css";
 import "./redesign.css";
+import "./motionops.css";
 
 const rootElement = document.getElementById("root");
 

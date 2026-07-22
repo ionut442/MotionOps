@@ -1,58 +1,49 @@
-import {
-  getWorkspaceById,
-  getWorkspaceIndex,
-  WORKSPACES,
-  type WorkspaceId
-} from "../workspaces";
-import { useApplicationState } from "../applicationStateContext";
-import { getDocumentStatusPresentation } from "../documentStatusPresentation";
-import { DocumentStatus } from "./DocumentStatus";
+import type { ReactElement } from "react";
+import { useApplicationState } from "../ApplicationStateProvider";
+import { WORKSPACE_LABELS } from "../../domain/workspaces";
 import { Icon } from "./Icon";
 
-export const GlobalHeader = ({
-  activeWorkspace,
-  onHelpOpen
-}: {
-  activeWorkspace: WorkspaceId;
-  onHelpOpen: () => void;
-}) => {
-  const applicationState = useApplicationState();
-  const workspace = getWorkspaceById(activeWorkspace);
-  const workspaceIndex = getWorkspaceIndex(activeWorkspace);
-  const documentStatus = getDocumentStatusPresentation(applicationState);
+export function GlobalHeader(): ReactElement {
+  const { state } = useApplicationState();
+  const workspace = WORKSPACE_LABELS[state.activeWorkspace];
 
   return (
-    <header className="shell-header global-header" aria-label="MotionOps header">
-      <div className="global-header-identity">
-        <span className="brand-mark">
-          <Icon name="motion" size={17} />
+    <header className="global-header" data-testid="global-header">
+      <div className="global-header-brand">
+        <span className="global-header-logo" aria-hidden="true">
+          <Icon name="motion" size={16} />
         </span>
-        <span className="global-header-product">
-          <span className="global-header-product-name">MotionOps</span>
-          <span className="global-header-product-caption">Motion workflow toolkit</span>
-        </span>
+        <span className="global-header-title">MotionOps</span>
       </div>
-
       <div className="global-header-workspace" aria-label="Active workflow step" data-testid="header-workspace">
-        <Icon name="sparkles" size={13} />
         <span className="workspace-context-label">{workspace.label}</span>
-        <span className="global-header-step">
-          {String(workspaceIndex + 1)}/{String(WORKSPACES.length)}
-        </span>
       </div>
-
-      <div className="global-header-status-slot">
-        <DocumentStatus presentation={documentStatus} />
+      <div className="global-header-actions">
         <button
-          aria-label="Open help and limitations"
-          className="help-trigger"
-          onClick={onHelpOpen}
-          title="Help and limitations"
+          className="header-action-button"
+          data-testid="header-help"
+          onClick={() => {
+            window.parent.postMessage({ pluginMessage: { type: "open-help" } }, "*");
+          }}
+          title="Help & documentation"
           type="button"
         >
-          <Icon name="help" size={15} />
+          <Icon name="help" size={14} />
+          <span className="visually-hidden">Help</span>
+        </button>
+        <button
+          className="header-action-button"
+          data-testid="header-settings"
+          onClick={() => {
+            window.parent.postMessage({ pluginMessage: { type: "open-settings" } }, "*");
+          }}
+          title="Settings"
+          type="button"
+        >
+          <Icon name="settings" size={14} />
+          <span className="visually-hidden">Settings</span>
         </button>
       </div>
     </header>
   );
-};
+}

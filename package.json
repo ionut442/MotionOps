@@ -15,9 +15,9 @@
     "test:build-artifacts": "node --test tests/buildArtifacts.test.mjs",
     "test:release-package": "npm run package:release && node --test tests/releasePackage.node-test.mjs",
     "test:ui": "playwright test",
-    "build": "npm run build:plugin && vite build && node scripts/inline-figma-ui.mjs",
+    "build": "vite build && node scripts/inline-figma-ui.mjs && npm run build:plugin",
     "build:plugin": "vite build --config vite.plugin.config.ts",
-    "build:lab": "npm run build:plugin:lab && vite build --mode lab && node scripts/inline-figma-ui.mjs",
+    "build:lab": "vite build --mode lab && node scripts/inline-figma-ui.mjs && npm run build:plugin:lab",
     "build:plugin:lab": "vite build --config vite.plugin.config.ts --mode lab",
     "package:release": "node scripts/build-release-package.mjs",
     "verify": "node scripts/verify.mjs"

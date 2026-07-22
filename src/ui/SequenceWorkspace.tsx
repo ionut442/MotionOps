@@ -298,91 +298,105 @@ export const SequenceWorkspace = ({
       {readState.status === "ready" && draft !== null ? (
         <>
           <div className="sequence-toolbar" aria-label="Sequencer controls">
-            <label className="scope-field">
-              <span>Scoped node</span>
-              <Select
-                label="Scoped node"
-                value={selectedNodeId}
-                onChange={(value) => {
-                  setSelectedNodeId(value);
-                  setTimeout(() => { rebuildDraft(snapshots); }, 0);
-                }}
-                options={snapshots.map((snapshot) => ({
-                  value: snapshot.nodeId,
-                  label: activeScope?.nodes.find((node) => node.id === snapshot.nodeId)?.name ?? snapshot.nodeId
-                }))}
-              />
-            </label>
-            <label className="scope-field">
-              <span>Delta (ms)</span>
-              <input inputMode="numeric" value={deltaMs} onChange={(event) => { setDeltaMs(event.currentTarget.value); }} />
-            </label>
-            <label className="scope-field">
-              <span>Snap (ms)</span>
-              <input inputMode="numeric" value={snapIntervalMs} onChange={(event) => { setSnapIntervalMs(event.currentTarget.value); }} />
-            </label>
-            <button onClick={() => { setDraft({ ...draft, snap: { enabled: !draft.snap.enabled, intervalMs: (integerOrNull(snapIntervalMs) ?? 50) as never } }); }} type="button">
-              Snap {draft.snap.enabled ? "on" : "off"}
-            </button>
-            <button onClick={() => { mutateByDelta((current, value) => offsetSelection(current, value as never)); }} type="button"><Icon name="chevron-right" size={13} /><span>Nudge forward</span></button>
-            <button onClick={() => { mutateByDelta((current, value) => offsetSelection(current, -value as never)); }} type="button"><Icon name="chevron-left" size={13} /><span>Nudge back</span></button>
-            <button onClick={() => { mutateByDelta((current, value) => resizeSelection(current, "end", value as never)); }} type="button"><Icon name="edit" size={13} /><span>Resize end</span></button>
-            <button onClick={() => { setDraft(alignSelection(draft, "start", { kind: "earliest" })); }} type="button"><Icon name="sequence" size={13} /><span>Align starts</span></button>
-            <button onClick={() => { setDraft(alignSelection(draft, "end", { kind: "latest" })); }} type="button"><Icon name="sequence" size={13} /><span>Align ends</span></button>
-            <button onClick={() => { setDraft(distributeSelection(draft, "starts")); }} type="button"><Icon name="stagger" size={13} /><span>Distribute</span></button>
-            <label className="scope-field">
-              <span>Stagger mode</span>
-              <Select
-                label="Stagger mode"
-                onChange={setStaggerTimingMode}
-                options={[
-                  { value: "fixed-interval", label: "Fixed interval" },
-                  { value: "total-duration", label: "Total duration" },
-                  { value: "fixed-overlap", label: "Fixed overlap" },
-                  { value: "sequential-after-end", label: "After previous end" },
-                  { value: "start-before-previous-end", label: "Before previous end" }
-                ]}
-                value={staggerTimingMode}
-              />
-            </label>
-            <label className="scope-field">
-              <span>{staggerTimingMode === "total-duration" ? "Total" : staggerTimingMode === "sequential-after-end" ? "Gap" : "Amount"} (ms)</span>
-              <input inputMode="numeric" value={staggerAmountMs} onChange={(event) => { setStaggerAmountMs(event.currentTarget.value); }} />
-            </label>
-            <label className="scope-field">
-              <span>Policy</span>
-              <Select
-                label="Policy"
-                onChange={setStaggerDurationPolicy}
-                options={[
-                  { value: "preserve", label: "Preserve durations" },
-                  { value: "scale-to-fit", label: "Scale to fit" }
-                ]}
-                value={staggerDurationPolicy}
-              />
-            </label>
-            <label className="scope-field">
-              <span>Anchor</span>
-              <Select
-                label="Anchor"
-                onChange={setStaggerAnchor}
-                options={[
-                  { value: "preserve-first-start", label: "First start" },
-                  { value: "preserve-last-end", label: "Last end" },
-                  { value: "extend-timeline", label: "Extend timeline" }
-                ]}
-                value={staggerAnchor}
-              />
-            </label>
-            <button onClick={applyStaggerToDraft} type="button"><Icon name="stagger" size={13} /><span>Stagger</span></button>
-            <label className="scope-field">
-              <span>Fit (ms)</span>
-              <input inputMode="numeric" value={fitDurationMs} onChange={(event) => { setFitDurationMs(event.currentTarget.value); }} />
-            </label>
-            <button onClick={() => { setDraft(fitSelectionToDuration(draft, (integerOrNull(fitDurationMs) ?? 1000) as never, "scale-all")); }} type="button"><Icon name="timing" size={13} /><span>Fit</span></button>
-            <button onClick={() => { setDraft(trimAndPadTimeline(draft, { trimStart: true, trimEnd: true, paddingEndMs: 100 as never })); }} type="button"><Icon name="edit" size={13} /><span>Trim/pad</span></button>
-            <button onClick={() => { setDraft(resetSequencerDraft(draft, snapshots.filter((snapshot) => snapshot.nodeId === selectedNodeId))); }} type="button"><Icon name="undo" size={13} /><span>Reset draft</span></button>
-            <button onClick={buildPreview} type="button"><Icon name="eye" size={13} /><span>Build preview</span></button>
+            <div className="sequence-toolbar-group" aria-label="Scoped node controls">
+              <label className="scope-field">
+                <span>Scoped node</span>
+                <Select
+                  label="Scoped node"
+                  value={selectedNodeId}
+                  onChange={(value) => {
+                    setSelectedNodeId(value);
+                    setTimeout(() => { rebuildDraft(snapshots); }, 0);
+                  }}
+                  options={snapshots.map((snapshot) => ({
+                    value: snapshot.nodeId,
+                    label: activeScope?.nodes.find((node) => node.id === snapshot.nodeId)?.name ?? snapshot.nodeId
+                  }))}
+                />
+              </label>
+            </div>
+            <span className="sequence-toolbar-divider" aria-hidden="true" />
+            <div className="sequence-toolbar-group" aria-label="Nudge controls">
+              <label className="scope-field">
+                <span>Delta (ms)</span>
+                <input inputMode="numeric" value={deltaMs} onChange={(event) => { setDeltaMs(event.currentTarget.value); }} />
+              </label>
+              <label className="scope-field">
+                <span>Snap (ms)</span>
+                <input inputMode="numeric" value={snapIntervalMs} onChange={(event) => { setSnapIntervalMs(event.currentTarget.value); }} />
+              </label>
+              <button onClick={() => { setDraft({ ...draft, snap: { enabled: !draft.snap.enabled, intervalMs: (integerOrNull(snapIntervalMs) ?? 50) as never } }); }} type="button">
+                Snap {draft.snap.enabled ? "on" : "off"}
+              </button>
+              <button onClick={() => { mutateByDelta((current, value) => offsetSelection(current, value as never)); }} type="button"><Icon name="chevron-right" size={13} /><span>Nudge forward</span></button>
+              <button onClick={() => { mutateByDelta((current, value) => offsetSelection(current, -value as never)); }} type="button"><Icon name="chevron-left" size={13} /><span>Nudge back</span></button>
+              <button onClick={() => { mutateByDelta((current, value) => resizeSelection(current, "end", value as never)); }} type="button"><Icon name="edit" size={13} /><span>Resize end</span></button>
+            </div>
+            <span className="sequence-toolbar-divider" aria-hidden="true" />
+            <div className="sequence-toolbar-group" aria-label="Align controls">
+              <button onClick={() => { setDraft(alignSelection(draft, "start", { kind: "earliest" })); }} type="button"><Icon name="sequence" size={13} /><span>Align starts</span></button>
+              <button onClick={() => { setDraft(alignSelection(draft, "end", { kind: "latest" })); }} type="button"><Icon name="sequence" size={13} /><span>Align ends</span></button>
+              <button onClick={() => { setDraft(distributeSelection(draft, "starts")); }} type="button"><Icon name="stagger" size={13} /><span>Distribute</span></button>
+            </div>
+            <span className="sequence-toolbar-divider" aria-hidden="true" />
+            <div className="sequence-toolbar-group" aria-label="Stagger controls">
+              <label className="scope-field">
+                <span>Stagger mode</span>
+                <Select
+                  label="Stagger mode"
+                  onChange={setStaggerTimingMode}
+                  options={[
+                    { value: "fixed-interval", label: "Fixed interval" },
+                    { value: "total-duration", label: "Total duration" },
+                    { value: "fixed-overlap", label: "Fixed overlap" },
+                    { value: "sequential-after-end", label: "After previous end" },
+                    { value: "start-before-previous-end", label: "Before previous end" }
+                  ]}
+                  value={staggerTimingMode}
+                />
+              </label>
+              <label className="scope-field">
+                <span>{staggerTimingMode === "total-duration" ? "Total" : staggerTimingMode === "sequential-after-end" ? "Gap" : "Amount"} (ms)</span>
+                <input inputMode="numeric" value={staggerAmountMs} onChange={(event) => { setStaggerAmountMs(event.currentTarget.value); }} />
+              </label>
+              <label className="scope-field">
+                <span>Policy</span>
+                <Select
+                  label="Policy"
+                  onChange={setStaggerDurationPolicy}
+                  options={[
+                    { value: "preserve", label: "Preserve durations" },
+                    { value: "scale-to-fit", label: "Scale to fit" }
+                  ]}
+                  value={staggerDurationPolicy}
+                />
+              </label>
+              <label className="scope-field">
+                <span>Anchor</span>
+                <Select
+                  label="Anchor"
+                  onChange={setStaggerAnchor}
+                  options={[
+                    { value: "preserve-first-start", label: "First start" },
+                    { value: "preserve-last-end", label: "Last end" },
+                    { value: "extend-timeline", label: "Extend timeline" }
+                  ]}
+                  value={staggerAnchor}
+                />
+              </label>
+              <button onClick={applyStaggerToDraft} type="button"><Icon name="stagger" size={13} /><span>Stagger</span></button>
+            </div>
+            <span className="sequence-toolbar-divider" aria-hidden="true" />
+            <div className="sequence-toolbar-group" aria-label="Draft controls">
+              <label className="scope-field">
+                <span>Fit (ms)</span>
+                <input inputMode="numeric" value={fitDurationMs} onChange={(event) => { setFitDurationMs(event.currentTarget.value); }} />
+              </label>
+              <button onClick={() => { setDraft(fitSelectionToDuration(draft, (integerOrNull(fitDurationMs) ?? 1000) as never, "scale-all")); }} type="button"><Icon name="timing" size={13} /><span>Fit</span></button>
+              <button onClick={() => { setDraft(trimAndPadTimeline(draft, { trimStart: true, trimEnd: true, paddingEndMs: 100 as never })); }} type="button"><Icon name="edit" size={13} /><span>Trim/pad</span></button>
+              <button onClick={() => { setDraft(resetSequencerDraft(draft, snapshots.filter((snapshot) => snapshot.nodeId === selectedNodeId))); }} type="button"><Icon name="undo" size={13} /><span>Reset draft</span></button>
+              <button onClick={buildPreview} type="button"><Icon name="eye" size={13} /><span>Build preview</span></button>
+            </div>
           </div>
 
           {propertyError === null ? null : <p className="edit-field-error">{propertyError}</p>}
