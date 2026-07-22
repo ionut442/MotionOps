@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { formatEasing, formatMilliseconds } from "../domain/inspector";
+import { formatMilliseconds, nodeTypeLabel, trackTiming } from "../domain/inspector";
 import type { MotionSnapshot, NormalizedEasing } from "../domain/motion";
 import type { ScopeScanResult } from "../domain/scopeScan";
 import { orderScopeNodes, type ScopeOrderMode } from "../domain/scopeOrdering";
@@ -18,6 +18,7 @@ import { ChangePreview, type ChangePreviewPlan } from "./components/ChangePrevie
 import { ContextDrawerShell } from "./components/ContextDrawerShell";
 import { Select } from "./components/ui";
 import { Icon } from "./components/Icon";
+import { propertyLabel, statusLabel } from "./editPresentation";
 
 interface EditWorkspaceProps {
   readonly activeScope: ScopeScanResult | null;
@@ -43,6 +44,27 @@ type ReadState =
   | { status: "error"; message: string };
 
 type ApplyResult = { status: string; message: string } | null;
+type PreviewMode = EditTab;
+
+interface PreviewSnapshot {
+  readonly mode: PreviewMode;
+  readonly plan: ChangePreviewPlan;
+  readonly fingerprint: string;
+  readonly sourceNodeId: string;
+  readonly targetContext: readonly string[];
+  readonly easingGroups?: readonly EasingGroup[];
+  readonly newEasing?: NormalizedEasing;
+}
+
+interface EasingGroup {
+  readonly id: string;
+  readonly name: string;
+  readonly raw: string;
+  readonly easing: NormalizedEasing;
+  readonly properties: readonly string[];
+  readonly segmentCount: number;
+  readonly mixedPropertyCount: number;
+}
 
 const isSupported = (status: string): boolean =>
   status === "supported" || status === "supported-with-warning";
@@ -80,6 +102,247 @@ const cubicBezierFromInput = (input: string): { ok: true; easing: NormalizedEasi
 const nodeLabel = (scope: ScopeScanResult | null, nodeId: string): string =>
   scope?.nodes.find((node) => node.id === nodeId)?.name ?? nodeId;
 
+const previewTitle = (mode: PreviewMode): string => {
+  switch (mode) {
+    case "timing":
+      return "Timing preview";
+    case "easing":
+      return "Easing preview";
+    case "copy-paste":
+      return "Paste preview";
+    case "stagger":
+      return "Stagger preview";
+    default:
+      return "Preview";
+  }
+};
+
+const applyLabel = (snapshot: PreviewSnapshot): string => {
+  const plan = snapshot.plan;
+  if (snapshot.mode === "stagger") {
+    return "Apply stagger";
+  }
+  switch (plan.operation.kind) {
+    case "replace-easing":
+      return "Apply easing";
+    case "paste-motion":
+      return "Paste motion";
+    case "set-duration":
+    case "set-delay":
+    case "scale-timing":
+      return `Apply ${String(plan.mutations.length)} ${plan.mutations.length === 1 ? "change" : "changes"}`;
+    case "empty":
+    case "spring":
+    case "sequencer-draft":
+      return "Apply";
+    default:
+      return "Apply";
+  }
+};
+
+const easingPresetCurves: Record<string, NormalizedEasing> = {
+  EASE_IN: { kind: "cubic-bezier", x1: 0.42, y1: 0, x2: 1, y2: 1 },
+  EASE_OUT: { kind: "cubic-bezier", x1: 0, y1: 0, x2: 0.58, y2: 1 },
+  EASE_IN_AND_OUT: { kind: "cubic-bezier", x1: 0.42, y1: 0, x2: 0.58, y2: 1 }
+};
+
+const easingDisplayName = (easing: NormalizedEasing | undefined): string => {
+  if (!easing) return "Not exposed";
+  if (easing.kind === "preset") {
+    switch (easing.name) {
+      case "EASE_IN":
+        return "Ease in";
+      case "EASE_OUT":
+        return "Ease out";
+      case "EASE_IN_AND_OUT":
+        return "Ease in and out";
+      default:
+        return easing.name.replaceAll("_", " ").toLowerCase().replace(/^./, (character) => character.toUpperCase());
+    }
+  }
+  if (easing.kind === "linear") return "Linear";
+  if (easing.kind === "cubic-bezier") {
+    const preset = closestPresetName(easing);
+    return preset ?? "Custom";
+  }
+  if (easing.kind === "spring") return "Spring";
+  return "Unknown";
+};
+
+const easingRawValue = (easing: NormalizedEasing | undefined): string => {
+  if (!easing) return "Not exposed";
+  if (easing.kind === "linear") return "linear";
+  if (easing.kind === "preset") return easing.name;
+  if (easing.kind === "cubic-bezier") {
+    return `cubic-bezier(${formatCurveNumber(easing.x1)}, ${formatCurveNumber(easing.y1)}, ${formatCurveNumber(easing.x2)}, ${formatCurveNumber(easing.y2)})`;
+  }
+  if (easing.kind === "spring") return "spring";
+  return "unknown";
+};
+
+const easingForCurve = (easing: NormalizedEasing | undefined): NormalizedEasing => {
+  if (!easing || easing.kind === "unknown" || easing.kind === "spring") return { kind: "linear" };
+  if (easing.kind === "preset") return easingPresetCurves[easing.name] ?? { kind: "linear" };
+  return easing;
+};
+
+const easingCurvePath = (easing: NormalizedEasing | undefined, width = 96, height = 48): string => {
+  const curve = easingForCurve(easing);
+  const left = 4;
+  const right = width - 4;
+  const bottom = height - 4;
+  const top = 4;
+  if (curve.kind === "linear") {
+    return `M${String(left)} ${String(bottom)} L${String(right)} ${String(top)}`;
+  }
+  if (curve.kind === "cubic-bezier") {
+    return `M${String(left)} ${String(bottom)} C ${String(left + curve.x1 * (right - left))} ${String(bottom - curve.y1 * (bottom - top))}, ${String(left + curve.x2 * (right - left))} ${String(bottom - curve.y2 * (bottom - top))}, ${String(right)} ${String(top)}`;
+  }
+  return `M${String(left)} ${String(bottom)} L${String(right)} ${String(top)}`;
+};
+
+const easingKey = (easing: NormalizedEasing | undefined): string => easingRawValue(easing);
+
+const segmentEasingGroups = (
+  snapshot: MotionSnapshot | null,
+  selectedTargetIds: ReadonlySet<string> | null = null
+): readonly EasingGroup[] => {
+  const groups = new Map<string, {
+    easing: NormalizedEasing;
+    properties: Set<string>;
+    segmentCount: number;
+    mixedProperties: Set<string>;
+  }>();
+  const propertyKeys = new Map<string, Set<string>>();
+  for (const track of snapshot?.manualTracks ?? []) {
+    const trackId = track.trackId ?? track.property;
+    if (selectedTargetIds !== null && !selectedTargetIds.has(trackId)) continue;
+    const property = propertyLabel(track.property);
+    const segmentKeys = new Set<string>();
+    for (let index = 1; index < track.keyframes.length; index += 1) {
+      const easing = track.keyframes[index]?.easing ?? { kind: "linear" as const };
+      const key = easingKey(easing);
+      segmentKeys.add(key);
+      const group = groups.get(key) ?? {
+        easing,
+        properties: new Set<string>(),
+        segmentCount: 0,
+        mixedProperties: new Set<string>()
+      };
+      group.properties.add(property);
+      group.segmentCount += 1;
+      groups.set(key, group);
+    }
+    propertyKeys.set(property, segmentKeys);
+  }
+  for (const [property, keys] of propertyKeys) {
+    if (keys.size <= 1) continue;
+    for (const key of keys) {
+      groups.get(key)?.mixedProperties.add(property);
+    }
+  }
+  return [...groups.entries()].map(([id, group]) => ({
+    id,
+    name: easingDisplayName(group.easing),
+    raw: easingRawValue(group.easing),
+    easing: group.easing,
+    properties: [...group.properties],
+    segmentCount: group.segmentCount,
+    mixedPropertyCount: group.mixedProperties.size
+  }));
+};
+
+const selectedSegmentCount = (groups: readonly EasingGroup[]): number =>
+  groups.reduce((sum, group) => sum + group.segmentCount, 0);
+
+const closestPresetName = (easing: NormalizedEasing): string | null => {
+  if (easing.kind !== "cubic-bezier") return null;
+  for (const [name, preset] of Object.entries(easingPresetCurves)) {
+    if (preset.kind !== "cubic-bezier") continue;
+    const distance = Math.abs(easing.x1 - preset.x1) + Math.abs(easing.y1 - preset.y1) + Math.abs(easing.x2 - preset.x2) + Math.abs(easing.y2 - preset.y2);
+    if (distance <= 0.08) {
+      return easingDisplayName({ kind: "preset", name });
+    }
+  }
+  return null;
+};
+
+const formatCurveNumber = (value: number): string => Number.parseFloat(value.toFixed(3)).toString();
+
+const EasingMiniCurve = ({ easing, label, size = "small" }: { readonly easing: NormalizedEasing | undefined; readonly label: string; readonly size?: "small" | "large" }) => (
+  <svg className="edit-easing-mini-curve" data-size={size} viewBox="0 0 96 48" role="img" aria-label={label}>
+    <line x1="4" y1="44" x2="92" y2="4" />
+    <path d={easingCurvePath(easing)} />
+  </svg>
+);
+
+const MotionSourceSummary = ({
+  actionLabel,
+  clipboard,
+  label,
+  selectedSnapshot,
+  sourceName
+}: {
+  readonly actionLabel: string;
+  readonly clipboard: MotionClipboard | null;
+  readonly label: string;
+  readonly selectedSnapshot: MotionSnapshot | null;
+  readonly sourceName: string;
+}) => {
+  const source = clipboard?.sources[0];
+  const trackCount = clipboard === null ? selectedSnapshot?.manualTracks.length ?? 0 : source?.manualTracks.length ?? 0;
+  const keyframeCount = selectedSnapshot?.manualTracks.reduce((sum, track) => sum + track.keyframes.length, 0) ?? Number(source?.timingSummary.keyframeCount ?? 0);
+  const segmentCount = selectedSnapshot?.manualTracks.reduce((sum, track) => sum + Math.max(0, track.keyframes.length - 1), 0) ?? Math.max(0, keyframeCount - trackCount);
+  const duration = selectedSnapshot?.manualTracks.reduce((max, track) => Math.max(max, trackTiming(track).durationMs), 0) ?? 0;
+  const properties = selectedSnapshot?.manualTracks.map((track) => propertyLabel(track.property)) ?? [];
+  return (
+    <div className="edit-motion-source-card">
+      <div className="edit-motion-source-icon" aria-hidden="true"><Icon name="motion" size={15} /></div>
+      <div>
+        <strong>{label}</strong>
+        <span title={sourceName}>{sourceName}</span>
+        <small>{nodeTypeLabel(selectedSnapshot?.nodeType ?? source?.sourceNodeType ?? "NODE")} · {actionLabel}</small>
+      </div>
+      <p>{String(trackCount)} properties · {String(keyframeCount)} keyframes · {String(segmentCount)} segments · {duration > 0 ? formatMilliseconds(duration) : "duration not exposed"}</p>
+      {properties.length > 0 ? (
+        <div className="edit-property-chip-list">
+          {properties.map((property) => <span key={property}>{property}</span>)}
+        </div>
+      ) : null}
+    </div>
+  );
+};
+
+const StaggerLiveTimeline = ({ amountMs, durationMs, labels }: { readonly amountMs: string; readonly durationMs: number; readonly labels: readonly string[] }) => {
+  const interval = asIntegerMs(amountMs) ?? 0;
+  const rows = labels.slice(0, 8).map((label, index) => ({
+    label,
+    start: index * interval,
+    end: index * interval + Math.max(1, durationMs || 450)
+  }));
+  const total = Math.max(1, ...rows.map((row) => row.end));
+  return (
+    <div className="edit-live-timeline" aria-label={`Live stagger timeline. Total span ${formatMilliseconds(total)}.`}>
+      <div className="edit-live-timeline-axis">
+        <span>0 ms</span>
+        <span>Total {formatMilliseconds(total)}</span>
+      </div>
+      {rows.map((row, index) => (
+        <div className="edit-live-timeline-row" key={`${row.label}-${String(index)}`}>
+          <span title={row.label}>{row.label}</span>
+          <i>
+            <b style={{
+              marginLeft: `${String((row.start / total) * 100)}%`,
+              width: `${String(Math.max(4, ((row.end - row.start) / total) * 100))}%`
+            }} />
+          </i>
+        </div>
+      ))}
+      {labels.length > rows.length ? <small>{String(labels.length - rows.length)} more targets included in final preview.</small> : null}
+    </div>
+  );
+};
+
 export const EditWorkspace = ({
   activeScope,
   lastMessage,
@@ -97,11 +360,11 @@ export const EditWorkspace = ({
   const [delayMs, setDelayMs] = useState("100");
   const [scaleNumerator, setScaleNumerator] = useState("2");
   const [scaleDenominator, setScaleDenominator] = useState("1");
-  const [easingMode, setEasingMode] = useState("linear");
+  const [easingMode, setEasingMode] = useState("");
   const [cubicBezier, setCubicBezier] = useState("cubic-bezier(0.2, 0, 0.4, 1)");
   const [fieldError, setFieldError] = useState<string | null>(null);
   const [planError, setPlanError] = useState<string | null>(null);
-  const [previewPlan, setPreviewPlan] = useState<ChangePreviewPlan | null>(null);
+  const [previewSnapshot, setPreviewSnapshot] = useState<PreviewSnapshot | null>(null);
   const [applyResult, setApplyResult] = useState<ApplyResult>(null);
   const [copyMode, setCopyMode] = useState<MotionClipboardCopyMode>("complete");
   const [clipboard, setClipboard] = useState<MotionClipboard | null>(null);
@@ -122,6 +385,7 @@ export const EditWorkspace = ({
   const activeApplyRequestRef = useRef<string | null>(null);
   const activeCopyRequestRef = useRef<string | null>(null);
   const activePasteRequestRef = useRef<string | null>(null);
+  const pendingPreviewRef = useRef<{ mode: PreviewMode; fingerprint: string; sourceNodeId: string; targetContext: readonly string[]; easingGroups?: readonly EasingGroup[]; newEasing?: NormalizedEasing } | null>(null);
   const lastScopeKeyRef = useRef("none");
 
   useEffect(() => {
@@ -130,7 +394,7 @@ export const EditWorkspace = ({
       return;
     }
     lastScopeKeyRef.current = key;
-    setPreviewPlan(null);
+    setPreviewSnapshot(null);
     setApplyResult(null);
     onContextDrawerChange(null);
 
@@ -169,12 +433,21 @@ export const EditWorkspace = ({
       activePlanRequestRef.current = null;
       if (lastMessage.result.ok) {
         const plan = lastMessage.result.plan as ChangePreviewPlan;
-        setPreviewPlan(plan);
+        setPreviewSnapshot({
+          mode: pendingPreviewRef.current?.mode ?? tab,
+          plan,
+          fingerprint: pendingPreviewRef.current?.fingerprint ?? "",
+          sourceNodeId: pendingPreviewRef.current?.sourceNodeId ?? selectedNodeId,
+          targetContext: pendingPreviewRef.current?.targetContext ?? [],
+          easingGroups: pendingPreviewRef.current?.easingGroups,
+          newEasing: pendingPreviewRef.current?.newEasing
+        });
+        pendingPreviewRef.current = null;
         setPlanError(null);
         setApplyResult(null);
         dispatchApplicationEvent({ type: "DRAFT_CHANGED", draftId: "planId" in plan ? String(plan.planId) : undefined });
       } else {
-        setPreviewPlan(null);
+        setPreviewSnapshot(null);
         setPlanError(lastMessage.result.error.message);
       }
     }
@@ -210,7 +483,16 @@ export const EditWorkspace = ({
       if (lastMessage.result.ok) {
         const plan = lastMessage.result.plan as ChangePreviewPlan;
         const summary = (lastMessage.result.compatibility as { summary?: { supported?: number; warnings?: number; partial?: number; readOnly?: number; unsupported?: number } }).summary;
-        setPreviewPlan(plan);
+        setPreviewSnapshot({
+          mode: pendingPreviewRef.current?.mode ?? tab,
+          plan,
+          fingerprint: pendingPreviewRef.current?.fingerprint ?? "",
+          sourceNodeId: pendingPreviewRef.current?.sourceNodeId ?? selectedNodeId,
+          targetContext: pendingPreviewRef.current?.targetContext ?? [],
+          easingGroups: pendingPreviewRef.current?.easingGroups,
+          newEasing: pendingPreviewRef.current?.newEasing
+        });
+        pendingPreviewRef.current = null;
         setPlanError(null);
         setApplyResult(null);
         setCompatibilitySummary(summary ? `Supported ${String(summary.supported ?? 0)}, warning ${String(summary.warnings ?? 0)}, partial ${String(summary.partial ?? 0)}, skipped ${String((summary.readOnly ?? 0) + (summary.unsupported ?? 0))}.` : "Compatibility analysis completed.");
@@ -247,15 +529,15 @@ export const EditWorkspace = ({
     return [
       ...selectedSnapshot.manualTracks.map((track) => ({
         id: track.trackId ?? track.property,
-        label: `${track.property} manual`,
-        meta: `${String(track.keyframes.length)} keyframes, ${track.write.status}`,
+        label: propertyLabel(track.property),
+        meta: `${String(track.keyframes.length)} keyframes · Manual · ${statusLabel(track.write.status)}`,
         readonly: !isSupported(track.write.status),
         source: "manual" as const
       })),
       ...selectedSnapshot.styleInstances.map((style, index) => ({
         id: style.appliedStyleInstanceId ?? style.availableAnimationStyleId ?? `style-${String(index)}`,
-        label: `${style.name ?? "Unnamed style"} style`,
-        meta: "read-only until live writer evidence exists",
+        label: propertyLabel(style.name ?? "Animation style"),
+        meta: "Animation style · Read-only",
         readonly: true,
         source: "style" as const
       }))
@@ -275,6 +557,91 @@ export const EditWorkspace = ({
   useEffect(() => {
     setSelectedTargetIds(new Set(targetOptions.filter((option) => option.source === "manual" && !option.readonly).map((option) => option.id)));
   }, [targetOptions]);
+
+  const currentPreviewFingerprint = (mode: PreviewMode): string => {
+    const targetIds = [...selectedTargetIds].sort();
+    const base = {
+      mode,
+      selectedNodeId,
+      targetIds,
+      scope: scopeKey(activeScope)
+    };
+    if (mode === "timing") {
+      return JSON.stringify({ ...base, timingMode, durationMs, delayMs, scaleNumerator, scaleDenominator });
+    }
+    if (mode === "easing") {
+      return JSON.stringify({ ...base, easingMode, cubicBezier });
+    }
+    if (mode === "copy-paste") {
+      return JSON.stringify({
+        ...base,
+        clipboardCreatedAtMs: clipboard?.createdAtMs ?? null,
+        copyMode,
+        pasteMode,
+        pasteMappingMode,
+        pasteOffsetMs,
+        pasteIntervalMs,
+        pasteReverse
+      });
+    }
+    return JSON.stringify({
+      ...base,
+      clipboardCreatedAtMs: clipboard?.createdAtMs ?? null,
+      copyMode,
+      pasteMode,
+      staggerTimingMode,
+      staggerAmountMs,
+      staggerDurationPolicy,
+      staggerAnchor,
+      staggerOrderMode,
+      orderedNodeIds: staggerOrderedNodes.map((node) => node.id)
+    });
+  };
+
+  const clearPreview = useCallback((reason?: string) => {
+    setPreviewSnapshot(null);
+    setApplyResult(null);
+    activeApplyRequestRef.current = null;
+    onContextDrawerChange(null);
+    if (reason) {
+      setPlanError(reason);
+    }
+    dispatchApplicationEvent({ type: "DRAFT_CLEARED" });
+  }, [dispatchApplicationEvent, onContextDrawerChange]);
+
+  useEffect(() => {
+    if (previewSnapshot === null) return;
+    if (previewSnapshot.mode !== tab || previewSnapshot.fingerprint !== currentPreviewFingerprint(previewSnapshot.mode)) {
+      clearPreview();
+    }
+  }, [
+    activeScope,
+    clearPreview,
+    clipboard?.createdAtMs,
+    copyMode,
+    cubicBezier,
+    delayMs,
+    durationMs,
+    easingMode,
+    pasteIntervalMs,
+    pasteMappingMode,
+    pasteMode,
+    pasteOffsetMs,
+    pasteReverse,
+    previewSnapshot,
+    scaleDenominator,
+    scaleNumerator,
+    selectedNodeId,
+    selectedTargetIds,
+    staggerAmountMs,
+    staggerAnchor,
+    staggerDurationPolicy,
+    staggerOrderMode,
+    staggerOrderedNodes,
+    staggerTimingMode,
+    tab,
+    timingMode
+  ]);
 
   const buildOperation = (): MotionEditOperation | null => {
     setFieldError(null);
@@ -311,6 +678,10 @@ export const EditWorkspace = ({
       return { kind: "scale-timing", numerator, denominator, origin: "start" };
     }
 
+    if (easingMode === "") {
+      setFieldError("Choose a new easing.");
+      return null;
+    }
     if (easingMode === "custom") {
       const parsed = cubicBezierFromInput(cubicBezier);
       if (!parsed.ok) {
@@ -330,7 +701,7 @@ export const EditWorkspace = ({
 
   const requestPlan = () => {
     if (selectedSnapshot === null) {
-      setPlanError("Select a scoped target with readable Motion data before building a plan.");
+      setPlanError("Select a scoped layer with readable Motion data before previewing changes.");
       return;
     }
     const operation = buildOperation();
@@ -342,11 +713,19 @@ export const EditWorkspace = ({
       ...targetOptions.filter((option) => option.source === "style").map((option) => option.id)
     ];
     if (targetIds.length === 0) {
-      setFieldError("Select at least one eligible manual track.");
+      setFieldError("Select at least one property.");
       return;
     }
     const requestId = createRequestId();
     activePlanRequestRef.current = requestId;
+    pendingPreviewRef.current = {
+      mode: tab,
+      fingerprint: currentPreviewFingerprint(tab),
+      sourceNodeId: selectedSnapshot.nodeId,
+      targetContext: targetIds,
+      easingGroups: tab === "easing" ? segmentEasingGroups(selectedSnapshot, selectedTargetIds) : undefined,
+      newEasing: operation.kind === "replace-easing" ? operation.easing : undefined
+    };
     setPlanError(null);
     sendToPlugin({
       type: "MOTION_PLAN_OPERATION_REQUEST",
@@ -392,6 +771,12 @@ export const EditWorkspace = ({
     }
     const requestId = createRequestId();
     activePasteRequestRef.current = requestId;
+    pendingPreviewRef.current = {
+      mode: "copy-paste",
+      fingerprint: currentPreviewFingerprint("copy-paste"),
+      sourceNodeId: clipboard.sources[0]?.sourceNodeId ?? "",
+      targetContext: activeScope.nodes.map((node) => node.id)
+    };
     setPlanError(null);
     sendToPlugin({
       type: "MOTION_PASTE_PLAN_REQUEST",
@@ -420,6 +805,12 @@ export const EditWorkspace = ({
     }
     const requestId = createRequestId();
     activePasteRequestRef.current = requestId;
+    pendingPreviewRef.current = {
+      mode: "stagger",
+      fingerprint: currentPreviewFingerprint("stagger"),
+      sourceNodeId: clipboard.sources[0]?.sourceNodeId ?? "",
+      targetContext: staggerOrderedNodes.map((node) => node.id)
+    };
     setPlanError(null);
     sendToPlugin({
       type: "MOTION_PASTE_PLAN_REQUEST",
@@ -446,34 +837,37 @@ export const EditWorkspace = ({
   };
 
   const applyPreview = useCallback(() => {
-    if (previewPlan === null) {
+    if (previewSnapshot === null) {
       return;
     }
+    if (previewSnapshot.mode !== tab || previewSnapshot.fingerprint !== currentPreviewFingerprint(previewSnapshot.mode)) {
+      clearPreview("This preview is out of date. Generate a new preview before applying.");
+      return;
+    }
+    const previewPlan = previewSnapshot.plan;
     const requestId = createRequestId();
     activeApplyRequestRef.current = requestId;
     dispatchApplicationEvent({ type: "APPLY_STARTED", operationId: "planId" in previewPlan ? String(previewPlan.planId) : requestId });
     sendToPlugin({ type: "MOTION_APPLY_CHANGE_PLAN_REQUEST", requestId, plan: previewPlan });
-  }, [createRequestId, dispatchApplicationEvent, previewPlan, sendToPlugin]);
+  }, [clearPreview, createRequestId, dispatchApplicationEvent, previewSnapshot, sendToPlugin, tab]);
 
   const dismissPreview = useCallback(() => {
-    setPreviewPlan(null);
-    setApplyResult(null);
-    onContextDrawerChange(null);
-    dispatchApplicationEvent({ type: "DRAFT_CLEARED" });
-  }, [dispatchApplicationEvent, onContextDrawerChange]);
+    clearPreview();
+  }, [clearPreview]);
 
   useEffect(() => {
-    if (previewPlan === null) {
+    if (previewSnapshot === null) {
       onContextDrawerChange(null);
       return;
     }
+    const previewPlan = previewSnapshot.plan;
     onContextDrawerChange(
       <ContextDrawerShell
-        description="Review the generated plan before writing to Figma."
+        description="Review what will happen before writing."
         mode="change-preview"
         onClose={dismissPreview}
         open={true}
-        title="Edit preview"
+        title={previewTitle(previewSnapshot.mode)}
         footer={
           <div className="edit-drawer-actions">
             {applyResult === null ? null : (
@@ -482,22 +876,32 @@ export const EditWorkspace = ({
               </span>
             )}
             <button onClick={dismissPreview} type="button">
-              Dismiss
+              Back
             </button>
             <button
               disabled={previewPlan.mutations.length === 0 || activeApplyRequestRef.current !== null}
               onClick={applyPreview}
               type="button"
             >
-              Apply
+              {applyLabel(previewSnapshot)}
             </button>
           </div>
         }
       >
-        <ChangePreview plan={previewPlan} />
+        <ChangePreview
+          context={{
+            mode: previewSnapshot.mode,
+            sourceName: nodeLabel(activeScope, previewSnapshot.sourceNodeId),
+            destinationNames: previewSnapshot.targetContext.map((id) => nodeLabel(activeScope, id)),
+            easingGroups: previewSnapshot.easingGroups,
+            newEasing: previewSnapshot.newEasing,
+            staggerIntervalMs: asIntegerMs(staggerAmountMs) ?? 0
+          }}
+          plan={previewPlan}
+        />
       </ContextDrawerShell>
     );
-  }, [applyPreview, applyResult, dismissPreview, onContextDrawerChange, previewPlan]);
+  }, [activeScope, applyPreview, applyResult, dismissPreview, onContextDrawerChange, previewSnapshot, staggerAmountMs]);
 
   const toggleTarget = (targetId: string, selected: boolean) => {
     setSelectedTargetIds((current) => {
@@ -510,6 +914,15 @@ export const EditWorkspace = ({
       return next;
     });
   };
+
+  const editableTargetCount = targetOptions.filter((option) => option.source === "manual" && !option.readonly).length;
+  const selectedEditableCount = targetOptions.filter((option) => option.source === "manual" && !option.readonly && selectedTargetIds.has(option.id)).length;
+  const previewDisabledReason =
+    tab === "easing" && easingMode === ""
+      ? "Choose a new easing."
+      : selectedEditableCount === 0 && (tab === "timing" || tab === "easing")
+        ? "Select at least one property."
+        : null;
 
   return (
     <section aria-label="Edit Motion" className="edit-workspace">
@@ -566,7 +979,7 @@ export const EditWorkspace = ({
         <>
           <div className="edit-layout">
             <fieldset className="edit-panel">
-              <legend>Target</legend>
+              <legend>{tab === "copy-paste" ? "Motion source" : tab === "stagger" ? "Reference motion" : "Target"}</legend>
               <label className="scope-field">
                 <span>Scoped node</span>
                 <Select
@@ -583,24 +996,49 @@ export const EditWorkspace = ({
               </label>
               <div className="edit-target-list" aria-label="Edit targets">
                 {targetOptions.length === 0 ? (
-                  <div className="scope-state">No manual or style Motion targets were exposed for this node.</div>
+                  <div className="scope-state">This layer has no editable animation properties.</div>
                 ) : (
-                  targetOptions.map((option) => (
-                    <label className="edit-target-option" data-readonly={option.readonly} key={option.id}>
-                      <input
-                        checked={option.source === "style" || selectedTargetIds.has(option.id)}
-                        disabled={option.source === "style" || option.readonly}
-                        onChange={(event) => {
-                          toggleTarget(option.id, event.currentTarget.checked);
-                        }}
-                        type="checkbox"
-                      />
+                  <>
+                    <div className="edit-target-summary">
+                      <span>{String(selectedEditableCount)} of {String(editableTargetCount)} properties selected</span>
                       <span>
-                        <strong>{option.label}</strong>
-                        <small>{option.meta}</small>
+                        <button
+                          disabled={editableTargetCount === 0 || selectedEditableCount === editableTargetCount}
+                          onClick={() => {
+                            setSelectedTargetIds(new Set(targetOptions.filter((option) => option.source === "manual" && !option.readonly).map((option) => option.id)));
+                          }}
+                          type="button"
+                        >
+                          Select all
+                        </button>
+                        <button
+                          disabled={selectedEditableCount === 0}
+                          onClick={() => {
+                            setSelectedTargetIds(new Set());
+                          }}
+                          type="button"
+                        >
+                          Deselect all
+                        </button>
                       </span>
-                    </label>
-                  ))
+                    </div>
+                    {targetOptions.map((option) => (
+                      <label className="edit-target-option" data-readonly={option.readonly} key={option.id}>
+                        <input
+                          checked={option.source === "style" || selectedTargetIds.has(option.id)}
+                          disabled={option.source === "style" || option.readonly}
+                          onChange={(event) => {
+                            toggleTarget(option.id, event.currentTarget.checked);
+                          }}
+                          type="checkbox"
+                        />
+                        <span>
+                          <strong title={option.label}>{option.label}</strong>
+                          <small>{option.meta}</small>
+                        </span>
+                      </label>
+                    ))}
+                  </>
                 )}
               </div>
             </fieldset>
@@ -625,11 +1063,13 @@ export const EditWorkspace = ({
                   cubicBezier={cubicBezier}
                   easingMode={easingMode}
                   selectedSnapshot={selectedSnapshot}
+                  selectedTargetIds={selectedTargetIds}
                   setCubicBezier={setCubicBezier}
                   setEasingMode={setEasingMode}
                 />
               ) : tab === "copy-paste" ? (
                 <CopyPasteFields
+                  activeScope={activeScope}
                   clipboard={clipboard}
                   clipboardMessage={clipboardMessage}
                   compatibilitySummary={compatibilitySummary}
@@ -641,6 +1081,8 @@ export const EditWorkspace = ({
                   pasteMappingMode={pasteMappingMode}
                   replaceClipboard={replaceClipboard}
                   requestPastePreview={requestPastePreview}
+                  selectedSnapshot={selectedSnapshot}
+                  sourceName={selectedSnapshot === null ? "No source selected" : nodeLabel(activeScope, selectedSnapshot.nodeId)}
                   setCopyMode={setCopyMode}
                   setPasteIntervalMs={setPasteIntervalMs}
                   setPasteMode={setPasteMode}
@@ -650,6 +1092,7 @@ export const EditWorkspace = ({
                 />
               ) : (
                 <StaggerFields
+                  activeScope={activeScope}
                   anchor={staggerAnchor}
                   amountMs={staggerAmountMs}
                   clipboard={clipboard}
@@ -659,6 +1102,8 @@ export const EditWorkspace = ({
                   pasteMode={pasteMode}
                   replaceClipboard={replaceClipboard}
                   requestStaggerPreview={requestStaggerPreview}
+                  selectedSnapshot={selectedSnapshot}
+                  sourceName={selectedSnapshot === null ? "No reference selected" : nodeLabel(activeScope, selectedSnapshot.nodeId)}
                   setAnchor={setStaggerAnchor}
                   setAmountMs={setStaggerAmountMs}
                   setDurationPolicy={setStaggerDurationPolicy}
@@ -671,7 +1116,10 @@ export const EditWorkspace = ({
               {fieldError === null ? null : <p className="edit-field-error">{fieldError}</p>}
               {planError === null ? null : <p className="edit-field-error">{planError}</p>}
               {tab === "copy-paste" || tab === "stagger" ? null : (
-                <button className="edit-primary-action" onClick={requestPlan} type="button"><Icon name="sparkles" size={13} /><span>Build plan</span></button>
+                <>
+                  {previewDisabledReason === null ? null : <p className="edit-field-note">{previewDisabledReason}</p>}
+                  <button className="edit-primary-action" disabled={previewDisabledReason !== null} onClick={requestPlan} type="button"><Icon name="eye" size={13} /><span>Preview changes</span></button>
+                </>
               )}
             </fieldset>
           </div>
@@ -710,6 +1158,7 @@ const TimingFields = ({
   setScaleNumerator: (value: string) => void;
 }) => (
   <>
+    <p className="edit-mode-intro">Change when the selected properties finish.</p>
     <label className="scope-field">
       <span>Operation</span>
       <Select
@@ -727,16 +1176,23 @@ const TimingFields = ({
       />
     </label>
     {mode === "duration-start" || mode === "duration-end" ? (
-      <label className="scope-field">
-        <span>Duration (ms)</span>
-        <input
-          inputMode="numeric"
-          onChange={(event) => {
-            setDurationMs(event.currentTarget.value);
-          }}
-          value={durationMs}
-        />
-      </label>
+      <>
+        <label className="scope-field">
+          <span>Duration (ms)</span>
+          <input
+            inputMode="numeric"
+            onChange={(event) => {
+              setDurationMs(event.currentTarget.value);
+            }}
+            value={durationMs}
+          />
+        </label>
+        <p className="edit-field-note">
+          {mode === "duration-start"
+            ? "Keep each property's first keyframe in place and move its final keyframe to the selected duration."
+            : "Keep each property's final keyframe in place and move its first keyframe to match the selected duration."}
+        </p>
+      </>
     ) : null}
     {mode === "delay-add" || mode === "delay-replace" ? (
       <label className="scope-field">
@@ -781,25 +1237,67 @@ const EasingFields = ({
   cubicBezier,
   easingMode,
   selectedSnapshot,
+  selectedTargetIds,
   setCubicBezier,
   setEasingMode
 }: {
   cubicBezier: string;
   easingMode: string;
   selectedSnapshot: MotionSnapshot | null;
+  selectedTargetIds: ReadonlySet<string>;
   setCubicBezier: (value: string) => void;
   setEasingMode: (value: string) => void;
 }) => {
-  const existing = selectedSnapshot?.manualTracks.flatMap((track) => track.keyframes.map((keyframe) => keyframe.easing)) ?? [];
+  const grouped = segmentEasingGroups(selectedSnapshot, selectedTargetIds);
+  const segmentCount = selectedSegmentCount(grouped);
+  const customParsed = easingMode === "custom" ? cubicBezierFromInput(cubicBezier) : null;
+  const replacement: NormalizedEasing | null =
+    easingMode === ""
+      ? null
+      : easingMode === "custom"
+        ? customParsed?.ok ? customParsed.easing : null
+        : easingMode === "linear"
+          ? { kind: "linear" }
+          : easingMode === "spring"
+            ? null
+            : { kind: "preset", name: easingMode };
   return (
     <>
+      <p className="edit-mode-intro">Change how quickly the selected properties accelerate and slow down.</p>
+      <section className="edit-current-easing" aria-label="Current easing">
+        <div className="edit-section-title-row">
+          <strong>Current easing</strong>
+          <span>
+            {grouped.length === 0
+              ? "No animated segments exposed"
+              : grouped.length === 1
+                ? `${grouped[0]?.name ?? "Current"} · ${String(segmentCount)} animated ${segmentCount === 1 ? "segment" : "segments"}`
+                : `Mixed · ${String(grouped.length)} current curves across ${String(segmentCount)} animated segments`}
+          </span>
+        </div>
+        {grouped.length > 0 ? (
+          <div className="edit-easing-group-list">
+            {grouped.map((group) => (
+              <div className="edit-easing-group-row" key={group.id} title={group.raw}>
+                <EasingMiniCurve easing={group.easing} label={`${group.name} curve`} />
+                <div>
+                  <strong>{group.name}</strong>
+                  <span>{String(group.segmentCount)} {group.segmentCount === 1 ? "segment" : "segments"} · {String(group.properties.length)} {group.properties.length === 1 ? "property" : "properties"}</span>
+                  <small>{group.properties.join(", ")}{group.mixedPropertyCount > 0 ? " · mixed within a property" : ""}</small>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : null}
+      </section>
       <label className="scope-field">
-        <span>Easing</span>
+        <span>New easing replaces current segments</span>
         <Select
-          label="Easing"
+          label="New easing"
           value={easingMode}
           onChange={setEasingMode}
           options={[
+            { value: "", label: "Choose easing...", disabled: true },
             { value: "linear", label: "Linear" },
             { value: "EASE_IN", label: "Ease in" },
             { value: "EASE_OUT", label: "Ease out" },
@@ -809,6 +1307,12 @@ const EasingFields = ({
           ]}
         />
       </label>
+      {replacement === null ? null : (
+        <div className="edit-new-easing-card">
+          <EasingMiniCurve easing={replacement} label={`${easingDisplayName(replacement)} replacement curve`} />
+          <span>Replacement curve: <strong>{easingDisplayName(replacement)}</strong></span>
+        </div>
+      )}
       {easingMode === "custom" ? (
         <label className="scope-field">
           <span>Cubic-bezier</span>
@@ -820,23 +1324,12 @@ const EasingFields = ({
           />
         </label>
       ) : null}
-      <div className="edit-easing-reference">
-        <strong>Existing easing</strong>
-        <span>{existing.length === 0 ? "No manual easing exposed" : existing.slice(0, 3).map(formatEasing).join(", ")}</span>
-      </div>
-      <div className="edit-easing-reference">
-        <strong>Timing range</strong>
-        <span>
-          {selectedSnapshot?.manualTracks[0]?.keyframes.length
-            ? selectedSnapshot.manualTracks[0].keyframes.map((keyframe) => formatMilliseconds(keyframe.timeMs)).join(", ")
-            : "No manual keyframes exposed"}
-        </span>
-      </div>
     </>
   );
 };
 
 const CopyPasteFields = ({
+  activeScope,
   clipboard,
   clipboardMessage,
   compatibilitySummary,
@@ -848,6 +1341,8 @@ const CopyPasteFields = ({
   pasteReverse,
   replaceClipboard,
   requestPastePreview,
+  selectedSnapshot,
+  sourceName,
   setCopyMode,
   setPasteIntervalMs,
   setPasteMappingMode,
@@ -855,6 +1350,7 @@ const CopyPasteFields = ({
   setPasteOffsetMs,
   setPasteReverse
 }: {
+  activeScope: ScopeScanResult | null;
   clipboard: MotionClipboard | null;
   clipboardMessage: string | null;
   compatibilitySummary: string | null;
@@ -866,6 +1362,8 @@ const CopyPasteFields = ({
   pasteReverse: boolean;
   replaceClipboard: () => void;
   requestPastePreview: () => void;
+  selectedSnapshot: MotionSnapshot | null;
+  sourceName: string;
   setCopyMode: (value: MotionClipboardCopyMode) => void;
   setPasteIntervalMs: (value: string) => void;
   setPasteMappingMode: (value: "one-to-many" | "scope-order") => void;
@@ -874,7 +1372,12 @@ const CopyPasteFields = ({
   setPasteReverse: (value: boolean) => void;
 }) => (
   <div className="edit-copy-paste">
-    <section className="edit-copy-paste-section" aria-label="Copy Motion">
+    <p className="edit-mode-intro">Reuse animation from one layer on other layers.</p>
+    <section className="edit-copy-paste-section" aria-label="Step 1 Copy a source">
+      <h3>1. Copy a source</h3>
+      {clipboard === null ? (
+        <p className="edit-field-note">No motion copied yet. Choose an animated source layer and copy its selected properties.</p>
+      ) : null}
       <label className="scope-field">
         <span>Copy mode</span>
         <Select
@@ -889,25 +1392,45 @@ const CopyPasteFields = ({
           ]}
         />
       </label>
-      <button className="edit-secondary-action" onClick={replaceClipboard} type="button"><Icon name="copy" size={13} /><span>Replace clipboard</span></button>
+      <button className="edit-secondary-action" onClick={replaceClipboard} type="button"><Icon name="copy" size={13} /><span>{clipboard === null ? "Copy selected motion" : "Change source"}</span></button>
       <div className="edit-clipboard-summary" aria-label="Clipboard summary">
         {clipboard === null ? (
-          <span>No Motion clipboard in this plugin session.</span>
+          <span>This clipboard exists only during the current plugin session.</span>
         ) : (
           <>
-            <strong>{clipboard.mode}</strong>
-            <span>{String(clipboard.sources.length)} source(s), {String(clipboard.sources.reduce((count, source) => count + source.manualTracks.length, 0))} manual track(s), {String(clipboard.sources.reduce((count, source) => count + source.styleInstances.length, 0))} read-only style item(s).</span>
+            <strong>{String(clipboard.sources.length)} source layer{clipboard.sources.length === 1 ? "" : "s"}</strong>
+            <span>{String(clipboard.sources.reduce((count, source) => count + source.manualTracks.length, 0))} copied properties · {String(clipboard.sources.reduce((count, source) => count + source.styleInstances.length, 0))} style item(s).</span>
           </>
         )}
       </div>
       {clipboardMessage === null ? null : <p className="edit-field-note">{clipboardMessage}</p>}
+      <MotionSourceSummary actionLabel={copyMode.replaceAll("-", " ")} clipboard={clipboard} label="SOURCE - multi-track copy reference" selectedSnapshot={selectedSnapshot} sourceName={sourceName} />
     </section>
 
-    <section className="edit-copy-paste-section" aria-label="Paste Motion">
+    <section className="edit-copy-paste-section" aria-label="Step 2 Destinations">
+      <h3>2. Choose destinations</h3>
+      <p className="edit-field-note">Scope controls destination inclusion. Review exact layer names before preview.</p>
+      <div className="edit-clipboard-summary">
+        <strong>Confirmed Scope</strong>
+        <span>{String(activeScope?.nodes.length ?? 0)} scoped destination layers. {clipboard === null ? "Copy motion before selecting paste options." : "Compatibility will be checked in preview."}</span>
+      </div>
+      <ul className="edit-destination-list" aria-label="Copy paste destinations">
+        {(activeScope?.nodes ?? []).map((node) => (
+          <li key={node.id}>
+            <Icon name="rectangle-node" size={13} />
+            <span title={node.name}>{node.name}</span>
+            <small>{clipboard === null ? "Copy source first" : "Pending compatibility"}</small>
+          </li>
+        ))}
+      </ul>
+    </section>
+
+    <section className="edit-copy-paste-section" aria-label="Step 3 Paste options" data-disabled={clipboard === null}>
+      <h3>3. Paste options</h3>
       <label className="scope-field">
-        <span>Paste mode</span>
+        <span>Paste behavior</span>
         <Select
-          label="Paste mode"
+          label="Paste behavior"
           value={pasteMode}
           onChange={setPasteMode}
           options={[
@@ -920,7 +1443,7 @@ const CopyPasteFields = ({
         />
       </label>
       <label className="scope-field">
-        <span>Mapping</span>
+        <span>Property mapping</span>
         <Select
           label="Mapping"
           value={pasteMappingMode}
@@ -931,48 +1454,53 @@ const CopyPasteFields = ({
           ]}
         />
       </label>
-      <div className="edit-scale-fields">
-        <label className="scope-field">
-          <span>Offset (ms)</span>
+      <details className="edit-advanced-options">
+        <summary>Advanced timing</summary>
+        <div className="edit-scale-fields">
+          <label className="scope-field">
+            <span>Offset (ms)</span>
+            <input
+              inputMode="numeric"
+              value={pasteOffsetMs}
+              onChange={(event) => {
+                setPasteOffsetMs(event.currentTarget.value);
+              }}
+            />
+          </label>
+          <label className="scope-field">
+            <span>Delay between destinations (ms)</span>
+            <input
+              inputMode="numeric"
+              value={pasteIntervalMs}
+              onChange={(event) => {
+                setPasteIntervalMs(event.currentTarget.value);
+              }}
+            />
+          </label>
+        </div>
+        <label className="edit-target-option">
           <input
-            inputMode="numeric"
-            value={pasteOffsetMs}
+            checked={pasteReverse}
             onChange={(event) => {
-              setPasteOffsetMs(event.currentTarget.value);
+              setPasteReverse(event.currentTarget.checked);
             }}
+            type="checkbox"
           />
+          <span>
+            <strong>Reverse destination order</strong>
+            <small>Applies the confirmed Scope order backwards.</small>
+          </span>
         </label>
-        <label className="scope-field">
-          <span>Interval (ms)</span>
-          <input
-            inputMode="numeric"
-            value={pasteIntervalMs}
-            onChange={(event) => {
-              setPasteIntervalMs(event.currentTarget.value);
-            }}
-          />
-        </label>
-      </div>
-      <label className="edit-target-option">
-        <input
-          checked={pasteReverse}
-          onChange={(event) => {
-            setPasteReverse(event.currentTarget.checked);
-          }}
-          type="checkbox"
-        />
-        <span>
-          <strong>Reverse current Scope order</strong>
-          <small>Uses the confirmed target order only.</small>
-        </span>
-      </label>
+      </details>
       {compatibilitySummary === null ? null : <p className="edit-field-note">{compatibilitySummary}</p>}
-      <button className="edit-primary-action" disabled={clipboard === null} onClick={requestPastePreview} type="button"><Icon name="eye" size={13} /><span>Build paste preview</span></button>
+      {clipboard === null ? <p className="edit-field-note">Copy motion before selecting paste options.</p> : null}
+      <button className="edit-primary-action" disabled={clipboard === null} onClick={requestPastePreview} type="button"><Icon name="eye" size={13} /><span>Preview changes</span></button>
     </section>
   </div>
 );
 
 const StaggerFields = ({
+  activeScope,
   anchor,
   amountMs,
   clipboard,
@@ -982,6 +1510,8 @@ const StaggerFields = ({
   pasteMode,
   replaceClipboard,
   requestStaggerPreview,
+  selectedSnapshot,
+  sourceName,
   setAnchor,
   setAmountMs,
   setDurationPolicy,
@@ -990,6 +1520,7 @@ const StaggerFields = ({
   setTimingMode,
   timingMode
 }: {
+  activeScope: ScopeScanResult | null;
   anchor: StaggerAnchor;
   amountMs: string;
   clipboard: MotionClipboard | null;
@@ -999,6 +1530,8 @@ const StaggerFields = ({
   pasteMode: PasteMode;
   replaceClipboard: () => void;
   requestStaggerPreview: () => void;
+  selectedSnapshot: MotionSnapshot | null;
+  sourceName: string;
   setAnchor: (value: StaggerAnchor) => void;
   setAmountMs: (value: string) => void;
   setDurationPolicy: (value: StaggerDurationPolicy) => void;
@@ -1008,44 +1541,63 @@ const StaggerFields = ({
   timingMode: StaggerTimingMode;
 }) => (
   <div className="edit-copy-paste">
-    <section className="edit-copy-paste-section" aria-label="Reference Motion">
-      <button className="edit-secondary-action" onClick={replaceClipboard} type="button"><Icon name="copy" size={13} /><span>Copy reference source</span></button>
+    <p className="edit-mode-intro">Apply motion across several layers with a delay between each start.</p>
+    <section className="edit-copy-paste-section" aria-label="Step 1 Reference motion">
+      <h3>1. Reference motion</h3>
+      {clipboard === null ? <p className="edit-field-note">No reference motion selected. Select an animated layer, then use its motion as the stagger source.</p> : null}
+      <button className="edit-secondary-action" onClick={replaceClipboard} type="button"><Icon name="copy" size={13} /><span>Use selected motion</span></button>
       <div className="edit-clipboard-summary" aria-label="Reference summary">
         {clipboard === null ? (
-          <span>No reference source copied.</span>
+          <span>Reference motion will stay in this plugin session until replaced.</span>
         ) : (
-          <span>{String(clipboard.sources.length)} source(s), {String(clipboard.sources[0]?.manualTracks.length ?? 0)} compatible manual track(s).</span>
+          <span>{String(clipboard.sources.length)} source layer{clipboard.sources.length === 1 ? "" : "s"} · {String(clipboard.sources[0]?.manualTracks.length ?? 0)} copied properties.</span>
         )}
       </div>
+      <MotionSourceSummary actionLabel="stagger reference" clipboard={clipboard} label="REFERENCE - stagger motion source" selectedSnapshot={selectedSnapshot} sourceName={sourceName} />
     </section>
-    <section className="edit-copy-paste-section" aria-label="Stagger configuration">
+    <section className="edit-copy-paste-section" aria-label="Step 2 Targets and order">
+      <h3>2. Targets and order</h3>
+      <p className="edit-field-note">The confirmed Scope provides the stagger targets.</p>
+      <label className="scope-field">
+        <span>Target order</span>
+        <Select
+          label="Target order"
+          onChange={setOrderMode}
+          options={[
+            { value: "layer-panel", label: "Layer panel order" },
+            { value: "reverse-layer-panel", label: "Reverse layer panel order" },
+            { value: "top-to-bottom", label: "Top to bottom" },
+            { value: "bottom-to-top", label: "Bottom to top" },
+            { value: "left-to-right", label: "Left to right" },
+            { value: "right-to-left", label: "Right to left" },
+            { value: "center-outward", label: "Center outward" },
+            { value: "edges-inward", label: "Edges inward" },
+            { value: "custom", label: "Current Scope order" }
+          ]}
+          value={orderMode}
+        />
+      </label>
+      <ol className="edit-order-list" aria-label="Resolved target order">
+        {orderedLabels.length === 0 ? (
+          <li>No confirmed Scope targets.</li>
+        ) : (
+          orderedLabels.map((label) => (
+            <li key={label} title={label}>{label}</li>
+          ))
+        )}
+      </ol>
+      <p className="edit-field-note">{String(activeScope?.nodes.length ?? 0)} targets resolved by {orderMode.replaceAll("-", " ")}.</p>
+    </section>
+    <section className="edit-copy-paste-section" aria-label="Step 3 Stagger timing">
+      <h3>3. Stagger timing</h3>
       <div className="edit-field-grid">
-        <label className="scope-field">
-          <span>Target order</span>
-          <Select
-            label="Target order"
-            onChange={setOrderMode}
-            options={[
-              { value: "layer-panel", label: "Layer-panel order" },
-              { value: "reverse-layer-panel", label: "Reverse layer-panel" },
-              { value: "top-to-bottom", label: "Top to bottom" },
-              { value: "bottom-to-top", label: "Bottom to top" },
-              { value: "left-to-right", label: "Left to right" },
-              { value: "right-to-left", label: "Right to left" },
-              { value: "center-outward", label: "Center outward" },
-              { value: "edges-inward", label: "Edges inward" },
-              { value: "custom", label: "Custom Scope order" }
-            ]}
-            value={orderMode}
-          />
-        </label>
         <label className="scope-field">
           <span>Timing mode</span>
           <Select
             label="Timing mode"
             onChange={setTimingMode}
             options={[
-              { value: "fixed-interval", label: "Fixed interval" },
+              { value: "fixed-interval", label: "Delay between starts" },
               { value: "total-duration", label: "Total duration" },
               { value: "fixed-overlap", label: "Fixed overlap" },
               { value: "sequential-after-end", label: "Sequential after end" },
@@ -1055,7 +1607,7 @@ const StaggerFields = ({
           />
         </label>
         <label className="scope-field">
-          <span>{timingMode === "total-duration" ? "Total duration" : timingMode === "sequential-after-end" ? "Gap" : timingMode === "fixed-interval" ? "Interval" : "Overlap"} (ms)</span>
+          <span>{timingMode === "total-duration" ? "Total duration" : timingMode === "sequential-after-end" ? "Gap" : timingMode === "fixed-interval" ? "Delay between starts" : "Overlap"} (ms)</span>
           <input inputMode="numeric" value={amountMs} onChange={(event) => { setAmountMs(event.currentTarget.value); }} />
         </label>
         <label className="scope-field">
@@ -1064,7 +1616,7 @@ const StaggerFields = ({
             label="Duration policy"
             onChange={setDurationPolicy}
             options={[
-              { value: "preserve", label: "Preserve each duration" },
+              { value: "preserve", label: "Keep each animation's duration" },
               { value: "scale-to-fit", label: "Scale to fit" }
             ]}
             value={durationPolicy}
@@ -1076,17 +1628,21 @@ const StaggerFields = ({
             label="Anchor"
             onChange={setAnchor}
             options={[
-              { value: "preserve-first-start", label: "Preserve first start" },
+              { value: "preserve-first-start", label: "Keep the first target's start time" },
               { value: "preserve-last-end", label: "Preserve last end" },
               { value: "extend-timeline", label: "Extend timeline" }
             ]}
             value={anchor}
           />
         </label>
+      </div>
+      <StaggerLiveTimeline amountMs={amountMs} durationMs={selectedSnapshot?.manualTracks.reduce((max, track) => Math.max(max, trackTiming(track).durationMs), 0) ?? 450} labels={orderedLabels} />
+      <details className="edit-advanced-options">
+        <summary>Advanced</summary>
         <label className="scope-field">
-          <span>Paste mode</span>
+          <span>Paste behavior</span>
           <Select
-            label="Paste mode"
+            label="Paste behavior"
             onChange={setPasteMode}
             options={[
               { value: "replace", label: "Replace existing animation" },
@@ -1098,12 +1654,9 @@ const StaggerFields = ({
             value={pasteMode}
           />
         </label>
-      </div>
-      <div className="edit-clipboard-summary" aria-label="Resolved target order">
-        <strong>Resolved order</strong>
-        <span>{orderedLabels.length === 0 ? "No confirmed Scope targets." : orderedLabels.join(" -> ")}</span>
-      </div>
-      <button className="edit-primary-action" disabled={clipboard === null} onClick={requestStaggerPreview} type="button"><Icon name="eye" size={13} /><span>Build stagger preview</span></button>
+      </details>
+      {clipboard === null ? <p className="edit-field-note">Use selected motion before previewing stagger.</p> : null}
+      <button className="edit-primary-action" disabled={clipboard === null} onClick={requestStaggerPreview} type="button"><Icon name="eye" size={13} /><span>Preview changes</span></button>
     </section>
   </div>
 );
