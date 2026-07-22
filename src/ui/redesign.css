@@ -1848,6 +1848,22 @@ textarea {
   align-self: end;
 }
 
+.edit-workspace .ui-select-trigger {
+  display: inline-grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  justify-content: stretch;
+  text-align: left;
+  width: 100%;
+}
+
+.edit-workspace .ui-select-trigger > span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .inspect-layout {
   grid-template-columns: clamp(220px, 28%, 300px) minmax(0, 1fr);
 }
@@ -2377,6 +2393,22 @@ textarea {
 .app-shell[data-density="narrow"] .global-header-status-slot {
   grid-column: auto;
   justify-content: flex-end;
+}
+
+.edit-workspace .ui-select-trigger {
+  display: inline-grid !important;
+  grid-template-columns: minmax(0, 1fr) auto !important;
+  justify-content: stretch !important;
+  text-align: left;
+  width: 100%;
+}
+
+.edit-workspace .ui-select-trigger > span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .app-shell[data-density="narrow"] .document-status {

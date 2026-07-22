@@ -161,12 +161,11 @@ describe("Edit workspace", () => {
 
     expect(container.textContent).toContain("Timing");
     expect(container.textContent).toContain("Easing");
-    expect(container.textContent).toContain("OPACITY manual");
-    expect(container.textContent).toContain("Opacity Style style");
-    expect(container.textContent).toContain("read-only until live writer evidence exists");
-    expect(container.textContent).not.toMatch(/Sequencer|QA|Standards|Handoff/);
-
-    click(Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Build plan") ?? null);
+    expect(container.textContent).toContain("Opacity");
+    expect(container.textContent).toContain("1 of 1 properties selected");
+    expect(container.textContent).toContain("Figma animation style");
+    expect(container.textContent).not.toContain("OPACITY manual");
+    click(Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Preview changes") ?? null);
     const planRequest = latestPluginMessage<{
       type: "MOTION_PLAN_OPERATION_REQUEST";
       requestId: string;
@@ -205,9 +204,10 @@ describe("Edit workspace", () => {
     });
 
     expect(container.textContent).toContain("Edit preview");
-    expect(container.textContent).toContain("Duration change");
-    expect(container.textContent).toContain("Apply");
-    click(Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Apply") ?? null);
+    expect(container.textContent).toContain("1 property will change");
+    expect(container.textContent).toContain("Apply 1 change");
+    expect(container.textContent).not.toContain("Mutations");
+    click(Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Apply 1 change") ?? null);
     const applyRequest = latestPluginMessage<{ type: "MOTION_APPLY_CHANGE_PLAN_REQUEST"; requestId: string; plan: unknown }>(
       postMessage,
       "MOTION_APPLY_CHANGE_PLAN_REQUEST"
@@ -222,10 +222,10 @@ describe("Edit workspace", () => {
     expect(container.textContent).toContain("Stale or unverifiable plan was blocked before write.");
 
     click(Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Easing") ?? null);
-    chooseComboboxOption("Easing", "Custom cubic-bezier");
+    chooseComboboxOption("New easing", "Custom cubic-bezier");
     const inputs = container.querySelectorAll("input");
     change(inputs[inputs.length - 1], "cubic-bezier(2, 0, 0.4, 1)");
-    click(Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Build plan") ?? null);
+    click(Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Preview changes") ?? null);
     expect(container.textContent).toContain("The x control points must be between 0 and 1.");
   });
 
@@ -247,7 +247,7 @@ describe("Edit workspace", () => {
     });
 
     click(Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Copy/Paste") ?? null);
-    click(Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Replace clipboard") ?? null);
+    click(Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Copy selected motion") ?? null);
     const copyRequest = latestPluginMessage<{
       type: "MOTION_CLIPBOARD_COPY_REQUEST";
       requestId: string;
@@ -281,7 +281,7 @@ describe("Edit workspace", () => {
       result: { ok: true, clipboard, serialized: "{}" }
     });
     expect(container.textContent).toContain("Clipboard replaced with 1 source");
-    click(Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Build paste preview") ?? null);
+    click(Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Preview changes") ?? null);
     const pasteRequest = latestPluginMessage<{
       type: "MOTION_PASTE_PLAN_REQUEST";
       requestId: string;
@@ -318,7 +318,7 @@ describe("Edit workspace", () => {
         }
       }
     });
-    expect(container.textContent).toContain("Paste Motion");
+    expect(container.textContent).toContain("Paste motion to 1 destination");
     expect(container.textContent).toContain("Supported 1");
   });
 });

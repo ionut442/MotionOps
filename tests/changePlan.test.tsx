@@ -261,11 +261,11 @@ describe("Phase 4 change preview foundation", () => {
       </ContextDrawerShell>
     );
 
-    expect(container.textContent).toContain("Duration change");
-    expect(container.textContent).toContain("Manual");
-    expect(container.textContent).toContain("Skipped targets");
-    expect(container.textContent).toContain("Warnings");
-    expect(container.textContent).toContain("OPACITY");
+    expect(container.textContent).toContain("1 property will change");
+    expect(container.textContent).toContain("Property details");
+    expect(container.textContent).toContain("Opacity");
+    expect(container.textContent).not.toContain("Mutations");
+    expect(container.textContent).not.toContain("styleInstances.applied");
     expect(container.textContent).not.toMatch(/\bApply\b|\bReset\b|Edit Timing|Copy\/Paste|Sequencer/);
   });
 });
