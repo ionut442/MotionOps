@@ -1,8 +1,26 @@
-import { formatMilliseconds } from "../../domain/inspector";
+import { formatEasing, formatMilliseconds } from "../../domain/inspector";
+import type { NormalizedEasing } from "../../domain/motion";
 import { propertyLabel } from "../editPresentation";
 
 export interface ChangePreviewProps {
   plan: ChangePreviewPlan;
+  context?: OperationPreviewContext;
+}
+
+export interface OperationPreviewContext {
+  readonly mode?: "timing" | "easing" | "copy-paste" | "stagger";
+  readonly sourceName?: string;
+  readonly destinationNames?: readonly string[];
+  readonly easingGroups?: readonly {
+    readonly id: string;
+    readonly name: string;
+    readonly raw: string;
+    readonly easing: NormalizedEasing;
+    readonly properties: readonly string[];
+    readonly segmentCount: number;
+  }[];
+  readonly newEasing?: NormalizedEasing;
+  readonly staggerIntervalMs?: number;
 }
 
 export interface ChangePreviewPlan {
@@ -37,23 +55,25 @@ interface PreviewDetail {
   readonly after: string;
 }
 
-export const ChangePreview = ({ plan }: ChangePreviewProps) => {
+export const ChangePreview = ({ context, plan }: ChangePreviewProps) => {
   const detailRows = previewDetails(plan);
   const warningGroups = aggregateMessages(plan.warnings.map((warning) => warning.message));
   const skippedGroups = aggregateMessages(plan.skipped.map((skip) => skip.message));
   const hasTimingVisual = plan.operation.kind === "set-duration" || plan.operation.kind === "set-delay" || plan.operation.kind === "scale-timing";
-  const hasStaggerVisual = plan.operation.kind === "paste-motion" && detailRows.length > 1;
+  const hasPasteMapping = context?.mode === "copy-paste" && plan.operation.kind === "paste-motion";
+  const hasStaggerVisual = context?.mode === "stagger" && plan.operation.kind === "paste-motion";
 
   return (
     <section aria-label="Change preview" className="change-preview">
       <header className="change-preview-header">
-        <h3>{outcomeTitle(plan)}</h3>
+        <h3>{outcomeTitle(plan, context)}</h3>
         <p>{outcomeDescription(plan)}</p>
       </header>
 
       {hasTimingVisual && detailRows.length > 0 ? <TimelineComparison first={detailRows[0]} /> : null}
-      {plan.operation.kind === "replace-easing" ? <EasingComparison details={detailRows} /> : null}
-      {hasStaggerVisual ? <StaggerTimeline details={detailRows} /> : null}
+      {plan.operation.kind === "replace-easing" ? <EasingComparison context={context} details={detailRows} /> : null}
+      {hasPasteMapping ? <PasteMappingPreview context={context} details={detailRows} /> : null}
+      {hasStaggerVisual ? <StaggerTimeline context={context} details={detailRows} /> : null}
 
       <dl className="change-preview-summary">
         <div>
@@ -105,8 +125,8 @@ export const ChangePreview = ({ plan }: ChangePreviewProps) => {
           <div className="change-preview-table" role="table" aria-label="Property before and after values">
             <div role="row">
               <span role="columnheader">Property</span>
-              <span role="columnheader">Before</span>
-              <span role="columnheader">After</span>
+            <span role="columnheader">{plan.operation.kind === "replace-easing" ? "Current easing" : "Before"}</span>
+            <span role="columnheader">{plan.operation.kind === "replace-easing" ? "New easing" : "After"}</span>
             </div>
             {detailRows.map((row) => (
               <div role="row" key={`${row.property}-${row.before}-${row.after}`}>
@@ -122,7 +142,7 @@ export const ChangePreview = ({ plan }: ChangePreviewProps) => {
   );
 };
 
-const outcomeTitle = (plan: ChangePreviewPlan): string => {
+const outcomeTitle = (plan: ChangePreviewPlan, context?: OperationPreviewContext): string => {
   const propertyCount = Math.max(plan.expected.manualMutations, plan.expected.beforeAfterExamples.length, plan.mutations.length);
   switch (plan.operation.kind) {
     case "set-duration":
@@ -130,8 +150,11 @@ const outcomeTitle = (plan: ChangePreviewPlan): string => {
     case "scale-timing":
       return `${String(propertyCount)} ${plural("property", propertyCount)} will change on ${String(plan.expected.affectedTargets)} ${plural("layer", plan.expected.affectedTargets)}`;
     case "replace-easing":
-      return `Replace easing on ${String(propertyCount)} animated ${plural("segment", propertyCount)}`;
+      return `${String(propertyCount)} animated ${plural("segment", propertyCount)} will use ${context?.newEasing ? friendlyEasingName(context.newEasing) : "the selected easing"}`;
     case "paste-motion":
+      if (context?.mode === "stagger") {
+        return `${String(context.destinationNames?.length ?? plan.expected.affectedTargets)} targets will stagger`;
+      }
       return `Paste motion to ${String(plan.expected.affectedTargets)} ${plural("destination", plan.expected.affectedTargets)}`;
     case "empty":
       return "No changes will be applied";
@@ -155,7 +178,7 @@ const outcomeDescription = (plan: ChangePreviewPlan): string => {
     case "set-duration":
     case "set-delay":
     case "scale-timing":
-      return "Review timing before writing these changes to Figma.";
+      return "Review timing before writing these changes.";
     case "empty":
       return "Select editable properties and configure a change to preview.";
     case "spring":
@@ -189,32 +212,81 @@ const TimelineBar = ({ label, value, max, tone = "current" }: { readonly label: 
   </div>
 );
 
-const EasingComparison = ({ details }: { readonly details: readonly PreviewDetail[] }) => (
-  <div className="change-preview-visual" aria-label="Easing replacement preview">
-    <div className="change-preview-curve">
-      <span>Before</span>
-      <svg viewBox="0 0 96 36" role="img" aria-label={details.length > 1 ? `${String(details.length)} existing curves` : "Existing easing curve"}>
-        <path d="M4 32 C 26 32, 32 4, 92 4" />
-      </svg>
-    </div>
-    <div className="change-preview-curve">
-      <span>After</span>
-      <svg viewBox="0 0 96 36" role="img" aria-label="Selected easing curve">
-        <path d="M4 32 C 28 20, 68 20, 92 4" />
-      </svg>
-    </div>
-  </div>
-);
-
-const StaggerTimeline = ({ details }: { readonly details: readonly PreviewDetail[] }) => {
-  const rows = details.slice(0, 6);
+const EasingComparison = ({ context, details }: { readonly context?: OperationPreviewContext; readonly details: readonly PreviewDetail[] }) => {
+  const groups = context?.easingGroups ?? [];
+  const newEasing = context?.newEasing;
   return (
-    <div className="change-preview-stagger" aria-label={`${String(details.length)} staggered layers preview`}>
+    <div className="change-preview-visual change-preview-easing" aria-label="Easing replacement preview">
+      <p>Keyframe times and property values will remain unchanged.</p>
+      <div className="change-preview-easing-columns">
+        <section>
+          <strong>Current</strong>
+          {groups.length > 0 ? groups.map((group) => (
+            <div className="change-preview-curve-row" key={group.id} title={group.raw}>
+              <CurveSvg easing={group.easing} label={`${group.name} current curve`} />
+              <span>{group.name} · {String(group.properties.length)} {plural("property", group.properties.length)}</span>
+            </div>
+          )) : (
+            <span>{details.length > 1 ? "Mixed current easing" : details[0]?.before ?? "Current easing"}</span>
+          )}
+        </section>
+        <section>
+          <strong>New</strong>
+          <div className="change-preview-curve-row" data-size="large">
+            <CurveSvg easing={newEasing} label={`${newEasing ? friendlyEasingName(newEasing) : "Selected"} new curve`} />
+            <span>{newEasing ? friendlyEasingName(newEasing) : "Selected easing"} · all {String(Math.max(details.length, 1))} {plural("property", Math.max(details.length, 1))}</span>
+          </div>
+        </section>
+      </div>
+      <div className="change-preview-motion-demo" aria-label="Static motion comparison">
+        <span>Current</span>
+        <i><b /></i>
+        <span>New</span>
+        <i data-tone="new"><b /></i>
+        <button type="button">Replay</button>
+      </div>
+    </div>
+  );
+};
+
+const PasteMappingPreview = ({ context, details }: { readonly context?: OperationPreviewContext; readonly details: readonly PreviewDetail[] }) => {
+  const destinations = context?.destinationNames?.slice(0, 4) ?? details.map((detail) => detail.property).slice(0, 4);
+  return (
+    <div className="change-preview-mapping" aria-label="Copy paste mapping preview">
+      <div className="change-preview-source-card">
+        <strong>{context?.sourceName ?? "Source layer"}</strong>
+        <span>{String(Math.max(details.length, 1))} properties</span>
+      </div>
+      <div className="change-preview-connector" aria-hidden="true" />
+      <div className="change-preview-destination-stack">
+        {destinations.map((destination, index) => (
+          <article key={`${destination}-${String(index)}`}>
+            <strong title={destination}>{destination}</strong>
+            <span>{String(Math.max(1, details.length - index))} properties mapped</span>
+            <small>{index === 0 ? "replace existing compatible motion" : "copy compatible properties"}</small>
+          </article>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+const StaggerTimeline = ({ context, details }: { readonly context?: OperationPreviewContext; readonly details: readonly PreviewDetail[] }) => {
+  const names = context?.destinationNames ?? details.map((detail) => detail.property);
+  const interval = context?.staggerIntervalMs ?? 100;
+  const rows = names.slice(0, 8).map((name, index) => ({ property: name, before: "", after: "", start: index * interval, end: index * interval + 450 }));
+  const total = Math.max(1, ...rows.map((row) => row.end));
+  return (
+    <div className="change-preview-stagger" aria-label={`${String(names.length)} staggered layers preview`}>
+      <div className="change-preview-stagger-summary">
+        <strong>{String(names.length)} targets</strong>
+        <span>Delay between starts {formatMilliseconds(interval)} · total span {formatMilliseconds(total)}</span>
+      </div>
       {rows.map((row, index) => (
         <div className="change-preview-stagger-row" key={`${row.property}-${String(index)}`}>
           <span title={row.property}>{row.property}</span>
           <span>
-            <i style={{ marginLeft: `${String(index * 9)}%`, width: "42%" }} />
+            <i style={{ marginLeft: `${String((row.start / total) * 100)}%`, width: `${String(Math.max(5, ((row.end - row.start) / total) * 100))}%` }} />
           </span>
         </div>
       ))}
@@ -222,9 +294,43 @@ const StaggerTimeline = ({ details }: { readonly details: readonly PreviewDetail
   );
 };
 
+const CurveSvg = ({ easing, label }: { readonly easing?: NormalizedEasing; readonly label: string }) => (
+  <svg viewBox="0 0 96 48" role="img" aria-label={label}>
+    <line x1="4" y1="44" x2="92" y2="4" />
+    <path d={curvePath(easing)} />
+  </svg>
+);
+
+const curvePath = (easing: NormalizedEasing | undefined): string => {
+  const curve = normalizedCurve(easing);
+  if (curve === null) return "M4 44 L92 4";
+  return `M4 44 C ${String(4 + curve.x1 * 88)} ${String(44 - curve.y1 * 40)}, ${String(4 + curve.x2 * 88)} ${String(44 - curve.y2 * 40)}, 92 4`;
+};
+
+const normalizedCurve = (easing: NormalizedEasing | undefined): { x1: number; y1: number; x2: number; y2: number } | null => {
+  if (!easing || easing.kind === "linear") return null;
+  if (easing.kind === "cubic-bezier") return easing;
+  if (easing.kind === "preset") {
+    if (easing.name === "EASE_IN") return { x1: 0.42, y1: 0, x2: 1, y2: 1 };
+    if (easing.name === "EASE_OUT") return { x1: 0, y1: 0, x2: 0.58, y2: 1 };
+    if (easing.name === "EASE_IN_AND_OUT") return { x1: 0.42, y1: 0, x2: 0.58, y2: 1 };
+  }
+  return null;
+};
+
+const friendlyEasingName = (easing: NormalizedEasing): string => {
+  if (easing.kind === "linear") return "Linear";
+  if (easing.kind === "preset") {
+    if (easing.name === "EASE_IN") return "Ease in";
+    if (easing.name === "EASE_OUT") return "Ease out";
+    if (easing.name === "EASE_IN_AND_OUT") return "Ease in and out";
+  }
+  return formatEasing(easing);
+};
+
 const previewDetails = (plan: ChangePreviewPlan): readonly PreviewDetail[] => {
   const fromMutations = plan.mutations
-    .map((mutation) => mutationDetail(mutation))
+    .map((mutation) => mutationDetail(mutation, plan.operation.kind))
     .filter((detail): detail is PreviewDetail => detail !== null);
   if (fromMutations.length > 0) {
     return fromMutations;
@@ -236,16 +342,24 @@ const previewDetails = (plan: ChangePreviewPlan): readonly PreviewDetail[] => {
   }));
 };
 
-const mutationDetail = (mutation: unknown): PreviewDetail | null => {
+const mutationDetail = (mutation: unknown, operationKind: ChangePreviewPlan["operation"]["kind"]): PreviewDetail | null => {
   if (!isRecord(mutation)) {
     return null;
   }
   const property = typeof mutation.property === "string" ? mutation.property : typeof mutation.target === "string" ? mutation.target : "Motion";
   return {
     property: propertyLabel(property.split(".").at(-1) ?? property),
-    before: trackRange(mutation.before) ?? previewValue(mutation.before, "Current"),
-    after: trackRange(mutation.after) ?? previewValue(mutation.after, "New")
+    before: operationKind === "replace-easing" ? trackEasing(mutation.before) ?? previewValue(mutation.before, "Current") : trackRange(mutation.before) ?? previewValue(mutation.before, "Current"),
+    after: operationKind === "replace-easing" ? trackEasing(mutation.after) ?? previewValue(mutation.after, "New") : trackRange(mutation.after) ?? previewValue(mutation.after, "New")
   };
+};
+
+const trackEasing = (value: unknown): string | null => {
+  if (!isRecord(value) || !Array.isArray(value.keyframes)) return null;
+  const labels = value.keyframes
+    .map((keyframe) => isRecord(keyframe) && isRecord(keyframe.easing) ? friendlyEasingName(keyframe.easing as NormalizedEasing) : null)
+    .filter((label): label is string => label !== null);
+  return labels.length === 0 ? null : [...new Set(labels)].join(", ");
 };
 
 const trackRange = (value: unknown): string | null => {
@@ -289,7 +403,7 @@ const cleanTechnicalText = (text: string): string =>
   text
     .replace(/(?:timelines|manualTracks|styleInstances)\.[\w:.-]+/g, "the selected animation")
     .replace(/\bmanual replacement mutation\(s\)/gi, "manual animation change")
-    .replace(/\bstyle mutation\(s\)/gi, "Figma animation style change")
+    .replace(/\bstyle mutation\(s\)/gi, "animation style change")
     .replace(/\btimeline mutation\(s\)/gi, "timeline change")
     .replace(/\bsupported-with-warning\b/g, "editable with limitations");
 

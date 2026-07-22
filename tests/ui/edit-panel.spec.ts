@@ -213,6 +213,63 @@ test("Edit preview aggregates warnings and does not squeeze the form at narrow w
     .toBe(true);
 });
 
+test("Edit previews are mode-specific and stale previews close on tab switch", async ({ page }) => {
+  await page.setViewportSize({ width: 1000, height: 720 });
+  await loadEditFixture(page);
+  await page.getByRole("button", { name: "Preview changes" }).click();
+  const timingRequestId = await pluginRequestId(page, "MOTION_PLAN_OPERATION_REQUEST");
+  await page.evaluate((requestId) => {
+    window.postMessage({
+      pluginMessage: {
+        type: "MOTION_PLAN_OPERATION_RESULT",
+        requestId,
+        result: {
+          ok: true,
+          plan: {
+            version: 1,
+            planId: "timing-stale-browser",
+            operation: { kind: "set-duration" },
+            mutations: [{ property: "OPACITY", before: { keyframes: [{ timeMs: 0 }, { timeMs: 450 }] }, after: { keyframes: [{ timeMs: 0 }, { timeMs: 800 }] } }],
+            skipped: [],
+            warnings: [],
+            expected: { affectedTargets: 1, manualMutations: 1, styleMutations: 0, timelineMutations: 0, skippedTargets: 0, expectedResults: [], beforeAfterExamples: [] }
+          }
+        }
+      }
+    });
+  }, timingRequestId);
+  await expect(page.getByText("Timing preview")).toBeVisible();
+  await page.getByRole("tab", { name: "Easing" }).click();
+  await expect(page.getByText("Timing preview")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Apply 1 change" })).toHaveCount(0);
+
+  await page.getByRole("tab", { name: "Copy/Paste" }).click();
+  await page.getByRole("button", { name: "Copy selected motion" }).click();
+  const copyRequestId = await pluginRequestId(page, "MOTION_CLIPBOARD_COPY_REQUEST");
+  await page.evaluate((requestId) => {
+    window.postMessage({
+      pluginMessage: {
+        type: "MOTION_CLIPBOARD_COPY_RESULT",
+        requestId,
+        result: {
+          ok: true,
+          clipboard: { version: 1, createdAtMs: 2, mode: "complete", sources: [{ sourceNodeId: "long", sourceNodeType: "RECTANGLE", sourceKind: "manual", copyMode: "complete", manualTracks: [{}, {}], styleInstances: [], timingSummary: { keyframeCount: 4 }, capabilities: {}, warnings: [] }] },
+          serialized: "{}"
+        }
+      }
+    });
+  }, copyRequestId);
+  await expect(page.getByText("SOURCE - multi-track copy reference")).toBeVisible();
+  await expect(page.getByRole("list", { name: "Copy paste destinations" }).getByText("Very Long Animated Checkout Header Layer Name That Needs Truncation In Edit")).toBeVisible();
+
+  await page.getByRole("tab", { name: "Stagger" }).click();
+  await expect(page.getByText("REFERENCE - stagger motion source")).toBeVisible();
+  await expect(page.getByRole("list", { name: "Resolved target order" }).getByText("Very Long Animated Checkout Header Layer Name That Needs Truncation In Edit")).toBeVisible();
+  await expect(page.locator(".edit-live-timeline")).toBeVisible();
+  await expect(page.getByText(/P5-019|fabricate destination values|manualTracks|timelines\./)).toHaveCount(0);
+});
+
+
 test("captures Edit panel deliverable screenshots", async ({ page }) => {
   const outDir = path.resolve("screenshots");
   await fs.mkdir(outDir, { recursive: true });

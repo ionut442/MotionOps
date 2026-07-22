@@ -163,7 +163,7 @@ describe("Edit workspace", () => {
     expect(container.textContent).toContain("Easing");
     expect(container.textContent).toContain("Opacity");
     expect(container.textContent).toContain("1 of 1 properties selected");
-    expect(container.textContent).toContain("Figma animation style");
+    expect(container.textContent).toContain("Animation style");
     expect(container.textContent).not.toContain("OPACITY manual");
     click(Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Preview changes") ?? null);
     const planRequest = latestPluginMessage<{
@@ -203,7 +203,7 @@ describe("Edit workspace", () => {
       }
     });
 
-    expect(container.textContent).toContain("Edit preview");
+    expect(container.textContent).toContain("Timing preview");
     expect(container.textContent).toContain("1 property will change");
     expect(container.textContent).toContain("Apply 1 change");
     expect(container.textContent).not.toContain("Mutations");
@@ -227,6 +227,87 @@ describe("Edit workspace", () => {
     change(inputs[inputs.length - 1], "cubic-bezier(2, 0, 0.4, 1)");
     click(Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Preview changes") ?? null);
     expect(container.textContent).toContain("The x control points must be between 0 and 1.");
+  });
+
+  test("invalidates preview snapshots when mode or selected properties change", () => {
+    const { container, postMessage } = renderApp();
+    postPluginMessage({ type: "PLUGIN_READY", pluginVersion: "0.0.0", figmaMode: "default", apiLabEnabled: false });
+    const scopeRequest = latestPluginMessage<{ type: "SCOPE_SCAN_REQUEST"; requestId: string }>(postMessage, "SCOPE_SCAN_REQUEST");
+    postPluginMessage({ type: "SCOPE_SCAN_RESULT", requestId: scopeRequest.requestId, result: scopeResult });
+    click(Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Confirm scope") ?? null);
+    click(container.querySelector('[role="tab"][aria-label="Edit workspace"]'));
+    const inspectRequest = latestPluginMessage<{ type: "MOTION_INSPECT_REQUEST"; requestId: string; nodeIds: readonly string[] }>(
+      postMessage,
+      "MOTION_INSPECT_REQUEST"
+    );
+    postPluginMessage({
+      type: "MOTION_INSPECT_RESULT",
+      requestId: inspectRequest.requestId,
+      result: { requestedNodeIds: ["mixed"], snapshots: [normalizeMotionSnapshot(node())], failures: [] }
+    });
+
+    click(Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Preview changes") ?? null);
+    const planRequest = latestPluginMessage<{ type: "MOTION_PLAN_OPERATION_REQUEST"; requestId: string }>(postMessage, "MOTION_PLAN_OPERATION_REQUEST");
+    postPluginMessage({
+      type: "MOTION_PLAN_OPERATION_RESULT",
+      requestId: planRequest.requestId,
+      result: {
+        ok: true,
+        plan: {
+          version: 1,
+          planId: "timing-stale",
+          operation: { kind: "set-duration" },
+          mutations: [{ id: "m1" }],
+          skipped: [],
+          warnings: [],
+          expected: {
+            affectedTargets: 1,
+            manualMutations: 1,
+            styleMutations: 0,
+            timelineMutations: 0,
+            skippedTargets: 0,
+            expectedResults: [],
+            beforeAfterExamples: [{ label: "OPACITY", before: "0, 500", after: "0, 700" }]
+          }
+        }
+      }
+    });
+    expect(container.textContent).toContain("Timing preview");
+    click(Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Easing") ?? null);
+    expect(container.textContent).not.toContain("Timing preview");
+    expect(container.textContent).not.toContain("Apply 1 change");
+
+    chooseComboboxOption("New easing", "Ease out");
+    click(Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Preview changes") ?? null);
+    const easingRequest = latestPluginMessage<{ type: "MOTION_PLAN_OPERATION_REQUEST"; requestId: string }>(postMessage, "MOTION_PLAN_OPERATION_REQUEST");
+    postPluginMessage({
+      type: "MOTION_PLAN_OPERATION_RESULT",
+      requestId: easingRequest.requestId,
+      result: {
+        ok: true,
+        plan: {
+          version: 1,
+          planId: "easing-stale",
+          operation: { kind: "replace-easing" },
+          mutations: [{ property: "OPACITY", before: { keyframes: [{ easing: { kind: "linear" } }] }, after: { keyframes: [{ easing: { kind: "preset", name: "EASE_OUT" } }] } }],
+          skipped: [],
+          warnings: [],
+          expected: {
+            affectedTargets: 1,
+            manualMutations: 1,
+            styleMutations: 0,
+            timelineMutations: 0,
+            skippedTargets: 0,
+            expectedResults: [],
+            beforeAfterExamples: []
+          }
+        }
+      }
+    });
+    expect(container.textContent).toContain("Easing preview");
+    click(Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Deselect all") ?? null);
+    expect(container.textContent).not.toContain("Easing preview");
+    expect(container.textContent).not.toContain("Apply easing");
   });
 
   test("copies Motion and builds a paste preview through typed Phase 5 messages", () => {
